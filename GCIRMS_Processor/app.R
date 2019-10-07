@@ -1,0 +1,1036 @@
+rm(list=ls())
+
+library(dplyr) # Data processing
+library(ggplot2); theme_set(theme_classic()) # Data visualization
+library(tidyr) # Data processing
+library(zoo) # needed for na.locf function
+library(lemon) # needed for facet_rep_wrap/grid functions
+library(writexl) # export the finished data
+library(readxl) # import the template file
+library(shinydashboard) # shiny
+library(DT) # tabular data is rendered via DT
+library(shiny) # shiny
+
+ingest_function <- function(raw_isodat_file,gcirms_template_file) {
+    
+        raw_irms_data <- read.csv(raw_isodat_file) # Read in the 'raw' IRMS export
+        sample_info <- read_xlsx(gcirms_template_file,sheet="Samples",range=cell_cols("A:B")) %>%  # Read in the 'Samples' sheet
+            rename(id1 = `Identifier 1`) # Change to the variable used throughout this script...
+        standard_info <- read_xlsx(gcirms_template_file,sheet="Standards",range=cell_cols("A:G")) %>% rename(std_mix = `Identifier 1`) # Read in the 'Standards' sheet
+        headers <- read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("B"))$export_header %>% # Vector of the headers in the raw_irms_data
+            setNames(read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("A"))$ingest_header) # Values to rename the original headers
+        derivatization_table <- read_xlsx(gcirms_template_file,sheet="Derivatization",range=cell_cols("A:F")) # Read in the 'Derivatization' Sheet
+        initials <- read_xlsx(gcirms_template_file,sheet="Initials",range=cell_cols(c("A:B"))) %>% # Read in the 'Initials' sheet
+            group_by(variable) %>% mutate(observation = 1:n()) %>% spread(variable,initial_value) # Reformat so that each initial is a variable.
+        
+        missing_headers <- names(headers[which(!(headers %in% colnames(raw_irms_data)))]) # Check for any mis-match between the 'Headers' sheet and the raw IRMS data.
+        
+        # If there are no missing headers, then go ahead with initial data processing:
+        if(length(missing_headers) == 0){
+            #Data Ingestion. Yum!
+            {
+            rawdata <- raw_irms_data %>% # Reads in the file.
+                filter(!is.na(Row)) %>% # Remove any blank rows (sometimes caused by export weirdness).
+                rename(!!!headers) %>%  # Rename the headers we will use based on the 'Headers' sheet in the GCIRMS template.
+                mutate(row = row - min(row) + 1) %>%  # Generates a row index starting with first exported injection. This is helpful as the first few rows are usually unused warmups.
+                group_by(row,id1,id2,comp) %>% 
+                filter(peak == max(peak)) %>% # Manually added peaks are added to the end of the peak list, but with the same 'comp' value. This filters
+                # so that only the last peak of a comp is used. This behavior is only known to be true for Isodat 3.0! Issues may occur for older/other software.
+                filter(comp != "" & comp != "-") %>% # Remove non-identified peaks.
+                select(row,id1,id2,conc,comp,rt,area,ampl,raw_R,dD_raw) %>% # Select only the headers we will use.
+                arrange(row) %>% ungroup()
+            
+            injections <- rawdata %>% 
+                select(row,id1) %>% #row is our unique injection identifier, but we do multiple injections per vial!
+                distinct() %>% # Removes all the extra rows for the exported compound information.
+                arrange(row) %>% # Sort the data frame by row.
+                group_by(id1) %>% # For each unique id1 we'll do the following... (warning: janky solution)
+                mutate(row_diff = c(0,diff(row)), # What's the difference in row for each injection of a vial? Practically, all non-first injections in each series is equal to 1.
+                       row_base = ifelse(row_diff == 1,NA,row), # If an injection isn't the first in a replicate injection series, mark it NA.
+                       row_base = na.locf(row_base)) %>% # locf = last observation carried forward, this marks each subsequent injection in a series with its starting row.
+                select(-c(row_diff))
+            
+            data <- full_join(rawdata,injections,by = c("row", "id1")) %>% 
+                mutate(id1 = as.character(id1),
+                       comp = as.character(comp)) %>% 
+                mutate(std_mix = ifelse(id2 == "sample",NA,id1)) %>% #id1 should be used to identify the standard mix names.
+                mutate(comp = ifelse(substr(comp,1,3)=="Ref","Ref",comp)) %>%  # Renames the reference gas pulses to just 'Ref'. This functionality is only known to work on Isodat 3.0
+                separate(comp,c("comp","class"),sep=" ",fill="right") %>% 
+                left_join(standard_info,by = c("std_mix", "comp", "class")) %>%  # Join with standard_info
+                mutate(conc = conc * relative_concentration) %>% 
+                filter(!is.na(row)) %>% 
+                mutate(dD_processing = dD_raw, # We use the 'dD_processing' variable as the placeholder for each data correction step.
+                       comp_class = paste(comp,class,sep=" ")) # This code currently assumes that compound and class uniquely identifies standards in a mix.
+            }
+            #Initial Diagnostic Plots
+            {
+                #IRMS Drift Plot
+                {
+                    irms_drift_calc <- data %>%
+                        mutate(slope = lm(dD_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to dD relationship... slope first...
+                               intercept = lm(dD_raw~raw_R)$coefficients[1], # ... then intercept
+                               rawraw_dD = raw_R * slope + intercept) %>%  # Estimate the dD of each ref peak using the above relationship.
+                        filter(grepl("Ref",comp)) %>%
+                        mutate(leftcenter_dD = rawraw_dD - mean(rawraw_dD[which(row==min(row))])) %>% # Center the extra raw 'rawraw_dD' on the first injection, so that we can see how drift proceeded.
+                        group_by(row) %>%
+                        mutate(sd = sd(leftcenter_dD)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
+                    
+                    if(length(irms_drift_calc$comp) == 0){
+                        plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,label="No Reference Gas Peaks Found.\n\nReference gas peaks should be identified and their name should start with\n'Ref' (i.e., Ref 1 or Reference 1) in the Component/comp column.",color="red")+theme_void()
+                    } else {
+                        # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "dD_raw" value that we calibrate.
+                        # As such, we do not need to correct for this drift at all. Instead, it is just a helpful visualization of how much drift the IRMS experienced during the run.
+                        # If this is huge (i.e., > 25 permil in range), then maybe it can be diagnostic of a problem...
+                        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=leftcenter_dD)) +
+                            geom_point() +
+                            labs(title = paste0("Mean Per-Injection Ref Peak SD: ",irms_drift_calc$mean_sd[1]," +/- ",irms_drift_calc$sd_sd[1],"\u2030"),
+                                 x = "Injection # in Sequence",
+                                 y = "IRMS Drift (\u2030)")    
+                        }
+                }
+                #Area/Amplitude Curves
+                {
+                    area_ampl_curve_data <- data %>% filter(grepl("size",id2) & comp != "Ref") # Grab just the size effect standards
+    
+                    if(length(area_ampl_curve_data$id1) == 0) {
+                        plot_area_curve <- ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
+                        plot_ampl_curve <- ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
+                        } else {
+                            plot_area_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=area)) +
+                                geom_point() +
+                                geom_smooth(method="lm",se=F) +
+                                facet_rep_wrap(~class+comp,nrow=2) +
+                                labs(x = "Concentration (ng / uL)",
+                                     y = "Peak Area")
+                            plot_ampl_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=ampl)) +
+                                geom_point() +
+                                geom_smooth(method="lm",se=F) +
+                                facet_rep_wrap(~class+comp,nrow=2) +
+                                labs(x = "Concentration (ng / uL)",
+                                     y = "Peak Amplitude")
+                    }
+                }
+            }
+        
+            list("raw_irms_check" = T,
+                 "raw_irms_data" = raw_irms_data,
+                 "sample_info" = sample_info,
+                 "standard_info" = standard_info,
+                 "plot_irms_drift" = plot_irms_drift,
+                 "plot_area_curve" = plot_area_curve,
+                 "plot_ampl_curve" = plot_ampl_curve,
+                 "derivatization_table" = derivatization_table,
+                 "initials" = initials,
+                 "data" = data)
+        } else # Otherwise, check for missing headers and list them as the only output.
+        if(length(missing_headers) > 0){list("raw_irms_check" = missing_headers)}
+}
+
+drift_function <- function(input,drift_option,drift_comp) {
+    
+    drift_raw <- input %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
+        filter(grepl("drift",id2)) %>%   # drift identification may be in id2 or id3
+        filter(!is.na(dD_known))
+    
+    if(length(drift_raw$id2) > 0) {
+        drift_raw_plot <-   ggplot(drift_raw,aes(x=row,y=dD_processing)) +
+            geom_point() +
+            geom_smooth(method="lm",se=F) +
+            facet_wrap(~comp_class,scales="free_y") +
+            labs(title = "Uncorrected Drift Standards",
+                 x = "Injection # in Sequence",
+                 y = "Raw dD (\u2030)")
+        drift_comp <- ifelse(drift_comp == "Mean drift of all compounds",NA,drift_comp)
+        drift_type <- ifelse(drift_option == "Linear interpolation between adjacent drift samples (use this when drift appears non-linear)",1,
+                      ifelse(drift_option == "Linear regression across all drift samples (use this when drift appears linear)",2,
+                      ifelse(drift_option == "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)",3,
+                             "drift_option in drift_function broken! Check that the radioButton choices still match!")))
+        
+        drift_correction <- drift_raw %>%
+            group_by(comp_class) %>% 
+            mutate(i = dense_rank((row_base)),
+                   dD_processing = dD_processing - mean(dD_processing)) %>%  # Generate an indexing variable for each set of standard injections... only relevant using drift_type 1
+            filter(ifelse(is.na(drift_comp),T,comp_class==drift_comp)) %>% 
+            group_by(row,i,row_base) %>% 
+            summarize(dD_mean = mean(dD_processing,na.rm=T)) %>% 
+            group_by(i) %>%
+            # The next mutate is doing the heavy lifting of calculating the slopes. Each 'bin' is a given drift sample (i) and the next drift sample (i+1)
+            # Since injection-to-injection time is practically constant, row number (row_mean) takes the place of time when calculating drift.
+            # We are basically just doing a two point linear regression to find the slope and y-intercept of the line.
+            mutate(slope_1 = lm(dD_mean~row,data=na.omit(.[which((.$i == i[1] | .$i == i[1]+1 )),]))$coefficients[2],
+                   intercept_1 = lm(dD_mean~row,data=na.omit(.[which((.$i == i[1] | .$i == i[1]+1 )),]))$coefficients[1]) %>% 
+            ungroup() %>% 
+            mutate(slope_1 = ifelse(i == max(i),slope_1[which(i == max(i)-1)],slope_1), # Assigns second to last slope to the last drift set.
+                   intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1)) %>% # Same as above.
+            # Next, we need to make a data frame to fill in all the rows (injections) that occurred between the drift samples.
+            full_join(data.frame(row = seq(1,max(input$row))),by="row") %>% 
+            arrange(row) %>%  # Sort the dataset by compound and then by row. This is important because we use a 'last-observation-carried-forward' command...
+            mutate(slope_2 = lm(dD_mean~row)$coefficients[2], # Calculates the slope for drift_type = 2
+                   intercept_2 = lm(dD_mean~row)$coefficients[1], # Calculates the intercept for drift_type = 2
+                   slope_1 = na.locf(slope_1), # The slope_1 and slope_1 have been calculated for each drift standard, but we want to use that standard's
+                   intercept_1 = na.locf(intercept_1)) %>% # slope and intercept for every injection until the next drift standard. The na.locf command accomplishes this.
+            # Okay, so correction_1 needs some exposition. Because we are doing linear interpolation between each nearest pair of drift standards, we are predicting
+            # the dD of a drift standard between those two within the 'round()' command of correction_1. Then, we subtract the grand mean (dD_center) from that value
+            # to determine the absolute dD deviation of a drift standard at that row. This estimates the absolute distance (in permil) that a drift standard in a given
+            # row would be from the grand mean of dD of actually injected drift standards. The assumption is, of course, that the drift between adjacent drift standards
+            # is linear.
+            mutate(correction_1 = round(row * slope_1 + intercept_1,6),
+                   correction_2 = (row * slope_2 + intercept_2), # This is just linear regression across all the drift samples.
+                   correction_3 = 0) %>% # No correction.
+            gather(correction_method,drift_correction,correction_1,correction_2,correction_3) %>% #Collapse all of the possible corrections into two columns...
+            separate(correction_method,c("var","method")) %>% # Separate the correction identifier...
+            filter(method %in% drift_type) #... and filter the data set for the correction indicated in the drift_type object.
+        
+        # This applies the drift correction to the data set.
+        output <- full_join(input %>% filter(comp != "Ref"), # Removes the reference peaks.
+                                      drift_correction %>% select(row,method,drift_correction) %>% distinct(), #Cleans up the drift_correction a bit.
+                                      by = "row") %>% 
+            mutate(dD_predrift = dD_processing,
+                   dD_processing = dD_processing - drift_correction,
+                   dD_drift = dD_processing)
+        
+        drift_corrected_standards_plot <- ggplot(output %>% filter(grepl("drift",id2)),aes(x=row,y=dD_processing)) +
+            geom_segment(aes(x = row, xend = row, y = dD_predrift, yend = dD_processing)) +
+            geom_point(color="blue",size=1.5) +
+            geom_point(aes(x=row,y=dD_predrift),size=1.5) +
+            geom_smooth(method="lm",se=F) +
+            facet_wrap(~comp,scales="free_y") +
+            labs(title = "Drift-Corrected Drift Standards",
+                 subtitle = "Blue = Corrected, Black = Uncorrected",
+                 x = "Injection # in Sequence",
+                 y = "Uncalibrated dD (\u2030)")
+        
+        drift_correction_by_row_plot <- ggplot(drift_correction,aes(x=row,y=drift_correction)) +
+            geom_hline(aes(yintercept = 0),color="blue") +
+            geom_segment(aes(x = row, xend = row, y = drift_correction, yend = 0),arrow = arrow(length=unit(2,"mm"))) +
+            geom_point() +
+            labs(title = "Absolute drift correction applied to each row.",
+                 x = "Injection # in Seqence",
+                 y = "Drift Correction (\u2030)")
+        
+        list("output" = output,
+             "drift_correction" = drift_correction,
+             "drift_raw_plot" = drift_raw_plot,
+             "drift_corrected_standards_plot" = drift_corrected_standards_plot,
+             "drift_correction_by_row_plot" = drift_correction_by_row_plot)
+    } else {
+        output <- input %>% filter(comp != "Ref") %>% 
+            mutate(dD_predrift = dD_processing,
+                   dD_processing = dD_predrift,
+                   dD_drift = dD_processing)
+        
+        list("output" = output,
+             "drift_correction" = ggplot()+annotate("text",x=0,y=0,label="No Drift Standards Found.",color="red")+theme_void(),
+             "drift_raw_plot" = ggplot()+annotate("text",x=0,y=0,label="No Drift Standards Found.",color="red")+theme_void(),
+             "drift_corrected_standards_plot" = ggplot()+annotate("text",x=0,y=0,label="No Drift Standards Found.",color="red")+theme_void(),
+             "drift_correction_by_row_plot" = ggplot()+annotate("text",x=0,y=0,label="No Drift Standards Found.",color="red")+theme_void())
+    }
+    
+}
+
+size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,size_small_peak_action,
+                          size_toosmall_peak_action,size_large_peak_action,acceptable_peak_units,
+                          largest_acceptable_peak,smallest_acceptable_peak) {
+
+    size_filter <- ifelse(size_option == "Peak Height (amplitude, mV)","ampl",
+                   ifelse(size_option == "Peak Area (Vs)","area",
+                   ifelse(size_option == "No size effect correction.","ampl",
+                    "size_option in size_function broken! Check that the radioButton choices still match!")))
+    
+    size_opt_out <- ifelse(size_option == "No size effect correction.",0,1)
+    
+    size_label = factor(size_filter,levels = c("area","ampl"),labels = c("Area ( Vs )","Amplitude ( mV )"))
+    
+    size_normal_peak_action = ifelse(size_normal_peak_action == "No size effect correction.",0,1)
+    size_small_peak_action = ifelse(size_small_peak_action == "No size effect correction.",0,1)
+    size_large_peak_action = ifelse(size_large_peak_action == "Remove size effect with 'Normal' size effect function.",1,
+                             ifelse(size_large_peak_action == "No size effect correction.",0,
+                             ifelse(size_large_peak_action == "Remove these from results.",NA,
+                                    "size_large_peak_action in size_function broken! Check that the radioButton choices still match!")))
+    size_toosmall_peak_action = ifelse(size_toosmall_peak_action == "Use 'Small' size effect function.",1,
+                                ifelse(size_toosmall_peak_action == "No size effect correction.",0,
+                                ifelse(size_toosmall_peak_action == "Remove these from results.",NA,
+                                       "size_toosmall_peak_action in size_function broken! Check that the radioButton choices still match!")))
+    
+    acceptable_peak_units = ifelse(acceptable_peak_units == "Peak Height (amplitude, mV)","ampl",
+                            ifelse(acceptable_peak_units == "Peak Area (Vs)","area",
+                                   "acceptable_peak_units in size_function broken! Check that the radioButton choices still match!"))
+    smallest_acceptable_peak = ifelse(is.na(smallest_acceptable_peak),0,smallest_acceptable_peak)
+    largest_acceptable_peak = ifelse(is.na(largest_acceptable_peak),Inf,largest_acceptable_peak)
+    
+    size_effect_input <- input %>% filter(grepl("size",id2))
+    
+        if(length(size_effect_input$id2) > 0) {
+            size_effect_raw <- input %>% filter(comp != "Ref") %>% 
+                filter(grepl("size",id2)) %>% # Grab just the size effect standards
+                gather(size_var,value,area,ampl) %>% group_by(row,id1,comp,class) %>% 
+                mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+                filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+                filter(size_var == size_filter) %>% 
+                mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
+                group_by(comp) %>% 
+                mutate(dD_zeroed = dD_processing - min(dD_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
+                group_by(size_group) %>% 
+                mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
+                       size_intercept = ifelse(!is.na(size_group),lm(dD_zeroed~value)$coefficients[1],0)) %>%  # Doing segmented size correction requires an intercept.
+                mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
+                       size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
+                mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
+                       size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
+                mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
+                       size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
+                mutate(dD_processing = dD_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                group_by(comp) %>% 
+                mutate(dD_drift_size_zeroed = dD_processing - mean(dD_processing)) %>% 
+                ungroup() %>% 
+                mutate(size_upper = max(value),
+                       size_lower = min(value),
+                       size_group = ifelse(is.na(size_group),"Normal",size_group))
+            
+            size_raw_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed)) +
+                geom_point() +
+                facet_wrap(~comp,scales="free",nrow=1) +
+                geom_smooth(method="lm",se=F) +
+                labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
+                     x=size_label,
+                     y="Drift-Corrected dD ( \u2030 )")
+            
+            size_raw_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
+                geom_point() +
+                geom_smooth(method="lm",se=F) +
+                labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
+                     y="Drift-Corrected dD ( \u2030 )",
+                     x=size_label)
+            
+            size_corrected_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_processing)) +
+                geom_point() +
+                facet_wrap(~comp,scales="free_y",nrow=1) +
+                geom_smooth(method="lm",se=F) +
+                labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave 100% identically.",
+                     y="Drift & Size Corrected dD ( \u2030 )",
+                     x=size_label)
+            
+            size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
+                geom_point(aes(color=comp)) +
+                geom_smooth(method="lm",se=F) +
+                labs(title="Corrected plot of size effect standards.",
+                     y="Drift & Size Corrected dD ( \u2030 )",
+                     x=size_label)
+            
+            size_effect_table <- data.frame(size_group = c("Too Small","Small","Normal","Large")) %>% mutate(size_group = as.character(size_group)) %>% 
+                left_join(size_effect_raw %>% select(size_group,size_slope,size_intercept) %>% distinct(),by="size_group") %>% 
+                gather(size_coef,value,size_slope,size_intercept) %>% 
+                spread(size_group,value) %>% group_by(size_coef) %>% 
+                mutate(Small = ifelse(is.na(Small),Normal,Small),
+                       `Too Small` = Small*size_toosmall_peak_action,
+                       Large = Normal*size_large_peak_action) %>% 
+                gather(size_group,value,Large,Normal,Small,`Too Small`) %>% 
+                spread(size_coef,value)
+            
+            output <- input %>% filter(comp != "Ref") %>% 
+                gather(size_var,value,area,ampl) %>% 
+                group_by(row,comp,class) %>% 
+                mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+                filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+                mutate(size_value = value[which(size_var == size_filter)],
+                       size_lower = size_effect_raw$size_lower[1],
+                       size_upper = size_effect_raw$size_upper[1],
+                       size_group = ifelse(size_value < size_cutoff & size_value >=size_lower,"Small","Normal"),
+                       size_group = ifelse(is.na(size_group),"Normal",size_group),
+                       size_group = ifelse(size_value < size_lower, "Too Small",
+                                    ifelse(size_value > size_upper, "Large",size_group))) %>% 
+                spread(size_var,value) %>% 
+                left_join(size_effect_table,by="size_group") %>% # Get size effect coefficients...
+                mutate(dD_presize = dD_processing,
+                       dD_processing = dD_presize - (size_slope*size_value + size_intercept),
+                       dD_size = dD_processing) %>% 
+                filter(!is.na(dD_processing))
+            
+            size_correction_plot <- data.frame(variable = size_filter,
+                                                 size_value = seq(from=0,to=max(output$size_value),by=100),
+                                                 size_lower = size_effect_raw$size_lower[1],
+                                                 size_upper = size_effect_raw$size_upper[1]) %>% 
+                mutate(size_group = ifelse(size_value < size_cutoff & size_value >=size_lower,"Small","Normal"),
+                       size_group = ifelse(is.na(size_group),"Normal",size_group),
+                       size_group = ifelse(size_value < size_lower, "Too Small",
+                                           ifelse(size_value > size_upper, "Large",size_group))) %>% 
+                full_join(size_effect_table,by="size_group") %>% 
+                mutate(size_correction = (size_value*size_slope+size_intercept),
+                       size_correction = ifelse(is.na(size_correction),0,size_correction),
+                       corrected = 0) %>% 
+                mutate(size_value = ifelse(size_group == "Too Small" & is.na(size_toosmall_peak_action),NA,size_value)) %>% 
+                filter(!is.na(size_value)) %>% 
+                mutate(size_group = factor(size_group,levels=c("Too Small","Small","Normal","Large"),ordered=T,
+                                           labels=c("Smaller Than Size Effect Curve",
+                                                    "Lower Segment of Size Effect Curve",
+                                                    "Upper Segment/Whole of Size Effect Curve",
+                                                    "Larger Than Size Effect Curve"))) %>% 
+                ggplot(aes(x=size_value,y=size_correction,color=size_group)) +
+                geom_point() +
+                geom_segment(aes(x = size_value, xend = size_value, y = size_correction, yend = corrected,group = size_value)) +
+                scale_color_brewer(type="qual",palette=2) +
+                labs(x=size_label,
+                     y="Size Effect Correction (\u2030)",
+                     color="Size Group")
+                
+                
+            list("output" = output,
+                 "size_filter" = size_filter,
+                 "size_effect_raw" = size_effect_raw,
+                 "size_raw_bycomp_plot" = size_raw_bycomp_plot,
+                 "size_raw_grouped_plot" = size_raw_grouped_plot,
+                 "size_corrected_bycomp_plot" = size_corrected_bycomp_plot,
+                 "size_corrected_grouped_plot" = size_corrected_grouped_plot,
+                 "size_correction_plot" = size_correction_plot
+                 )
+        } else {
+            output <- input %>% filter(comp != "Ref") %>% 
+                gather(size_var,value,area,ampl) %>% 
+                group_by(row,comp,class) %>% 
+                mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+                filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+                mutate(size_value = value[which(size_var == size_filter)],
+                       size_lower = NA,
+                       size_upper = NA,
+                       size_group = NA) %>% 
+                spread(size_var,value) %>% 
+                mutate(dD_presize = dD_processing,
+                       dD_processing = dD_presize,
+                       dD_size = dD_processing) %>% 
+                filter(!is.na(dD_processing))
+            
+            list("output" = output,
+                 "size_filter" = NULL,
+                 "size_effect_raw" = NULL,
+                 "size_raw_bycomp_plot" = ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void(),
+                 "size_raw_grouped_plot" = ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void(),
+                 "size_corrected_bycomp_plot" = ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void(),
+                 "size_corrected_grouped_plot" = ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void(),
+                 "size_correction_plot" = ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
+            )
+        }
+}
+
+normalization_function <- function(input,normalization_option,normalization_comps) {
+    
+    scale_check <- input %>% filter(grepl("standard",id2))
+    
+    if(length(scale_check$id2) > 0){
+        normalization_option = ifelse(grepl("Linear interpolation between adjacent normalization standards",normalization_option),1,2)
+        mix_to_use = input %>% filter(grepl("standard",id2)) %>% ungroup() %>% select(std_mix) %>% distinct() %>% .$std_mix
+        comps_to_use = input %>% filter(std_mix == mix_to_use & comp_class %in% normalization_comps) %>% ungroup() %>% select(comp_class) %>% distinct() %>% .$comp_class
+        
+        scale_normalization_1 <- input %>% filter(comp != "Ref") %>% 
+            filter(grepl("standard",id2) & comp_class %in% comps_to_use) %>% 
+            filter(!is.na(dD_known)) %>% 
+            select(row,row_base,std_mix,id2,comp,class,dD_known,dD_processing) %>% 
+            group_by(comp,class) %>% 
+            mutate(i = dense_rank((row_base))) %>%  # Generate an indexing variable for each set of standard injections... only relevant using normalization_option 1
+            group_by(i) %>%
+            # The next mutate is doing the heavy lifting. Each 'bin' is a given drift sample (i) and the next drift sample (i+1)
+            # We are basically just doing a two point linear regression to find the slope and y-intercept of the line.
+            mutate(slope_1 = lm(dD_known~dD_processing,data=.[which(.$i == i[1] | .$i == i[1]+1 ),])$coefficients[2],
+                   intercept_1 = lm(dD_known~dD_processing,data=.[which(.$i == i[1] | .$i == i[1]+1 ),])$coefficients[1]) %>% 
+            ungroup() %>% 
+            mutate(slope_1 = ifelse(i == max(i),slope_1[which(i == max(i)-1)],slope_1), # Assigns second to last slope to the last drift set.
+                   intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1), # Same as above.
+                   slope_2 = lm(dD_known~dD_processing)$coefficients[2], # Calculates the slope for normalization_option = 2
+                   intercept_2 = lm(dD_known~dD_processing)$coefficients[1])  # Calculates the intercept for normalization_option = 2
+        
+        # Next, we need to make a data frame to fill in all the rows (injections) that occurred between the drift samples.
+        scale_normalization_2 <- scale_normalization_1 %>% 
+            full_join(data.frame(row = seq(1,max(input$row))),by="row") %>% 
+            gather(coef,value,slope_1,slope_2,intercept_1,intercept_2) %>% 
+            separate(coef,c("coef","normalization_method"),sep="_") %>% 
+            select(row,coef,normalization_method,value) %>% distinct() %>%
+            filter(normalization_method %in% normalization_option) %>%
+            group_by(coef) %>% 
+            mutate(value = ifelse(row == min(row),value[which(row == min(row[which(!is.na(value))]))],value)) %>% 
+            arrange(coef,row) %>%  # Sort the dataset by coefficient and then by row. This is important because we use a 'last-observation-carried-forward' command...
+            mutate(value = na.locf(value)) %>% # ... which fills each row with the preceding row's coefficient value.
+            distinct() %>% 
+            spread(coef,value)
+        
+        normalization_plot <- scale_normalization_1 %>% 
+            gather(coef,value,slope_1:intercept_2) %>% 
+            separate(coef,c("coef","normalization_method"),sep="_") %>% 
+            spread(coef,value) %>% 
+            group_by(i,normalization_method) %>% 
+            mutate(method_label = factor(normalization_method,levels=c(1,2),labels=c("Bracketed Normalization","Full-Run Normalization")),
+                   equation = paste0("y = ",round(slope[1],4)," * x + ",round(intercept[1],4)),
+                   label = paste(method_label,equation,sep="\n")) %>% 
+            filter(normalization_method %in% normalization_option) %>% 
+            ggplot(aes(x=dD_processing, y=dD_known)) +
+            geom_point() +
+            geom_smooth(method="lm",se=F) +
+            facet_rep_wrap(~label) +
+            labs(x="Observed dD ( \u2030 )",
+                 y="Known dD ( \u2030 )",
+                 title="VSMOW-SLAP Scale Normalization Curve")
+        
+        output <- input %>% filter(comp != "Ref") %>% 
+            full_join(scale_normalization_2,by = "row") %>% 
+            mutate(dD_prenormalization = dD_processing,
+                   dD_processing = dD_prenormalization * slope + intercept,
+                   dD_normalization = dD_processing) %>% 
+            anti_join(scale_normalization_1,by = c("row", "id2", "comp", "class", "row_base", "std_mix", "dD_known"))
+        
+        list("output" = output,
+             "scale_normalization_1" = scale_normalization_1,
+             "scale_normalization_2" = scale_normalization_2,
+             "normalization_plot" = normalization_plot)
+    } else {
+        output <- input %>% filter(comp != "Ref") %>% 
+            mutate(dD_prenormalization = dD_processing,
+                   dD_processing = dD_prenormalization,
+                   dD_normalization = dD_processing)
+        list("output" = output,
+             "scale_normalization_1" = NULL,
+             "scale_normalization_2" = NULL,
+             "normalization_plot" = ggplot()+annotate("text",x=0,y=0,label="No Normalization Standards Found!",color="red")+theme_void())
+    }
+}
+
+control_function <- function(input,normalization_comps,processing_order) {
+    control_check <- input %>% filter(grepl("control",id2))
+    
+    if(length(control_check$id2) > 0) {
+        control_standards <- input %>% 
+            filter(grepl("control",id2)) %>% 
+            filter(!(comp_class %in% normalization_comps)) %>% 
+            ungroup() %>% 
+            select(comp_class,conc,std_mix,dD_processing,dD_known) %>% 
+            mutate(ungrouped_full_rmse = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1)) %>% 
+            group_by(std_mix,conc) %>% 
+            mutate(std_mix_rmse = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1)) %>% 
+            group_by(comp_class,conc,std_mix,ungrouped_full_rmse,std_mix_rmse) %>%
+            summarize(observed_value = round(mean(dD_processing),1),
+                      observed_sd = round(sd(dD_processing),1),
+                      accepted_value = round(unique(dD_known)[1],1),
+                      root_mean_square_error = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1),
+                      mean_signed_difference = round(sum(dD_known-dD_processing)/(n()-1),1)) %>% 
+            arrange(std_mix,conc,comp_class)
+        
+        proc_table <- data.frame(levels = c("dD_raw","dD_drift","dD_size","dD_normalization"),
+                                 proc_label = c("Raw","Drift","Size","Scale Normalization")) %>% 
+            full_join(data.frame(proc_label = c("Raw",processing_order),
+                                 order = 1:4),by = "proc_label") %>% 
+            mutate(label = paste0("Step ",order,": ",proc_label)) %>% 
+            arrange(order)
+        
+        correction_visual_plot <- input %>% filter(!is.na(dD_known)) %>% 
+            gather(dD_type,value,dD_raw,dD_drift,dD_size,dD_normalization) %>% 
+            mutate(dD_type = factor(dD_type,levels=proc_table$levels,ordered=T,
+                                    labels=proc_table$label)) %>% 
+            group_by(dD_type,dD_known,dD_known_sd,std_mix,conc,comp) %>% 
+            summarize(dD_mean = mean(value),
+                      dD_sd = sd(value)) %>% 
+            mutate(std_conc = paste(std_mix,conc))
+        
+        corrections_plot <- ggplot(correction_visual_plot, aes(x=dD_mean,y=dD_known)) +
+            geom_errorbar(aes(ymin = dD_known - dD_known_sd, ymax = dD_known + dD_known_sd),width=0) +
+            geom_errorbarh(aes(xmin = dD_mean - dD_sd,xmax = dD_mean + dD_sd),height=0) +
+            geom_smooth(method="lm",se=F,color="black",size=0.25) +
+            geom_point(aes(color=std_conc),size=2.5) +
+            facet_rep_wrap(~dD_type) + 
+            labs(x = "dD Observed ( \u2030 )",
+                 y = "dD Known ( \u2030 )",
+                 color = "Standard + Concentration")
+        
+        list("control_standards" = control_standards,
+             "corrections_plot" = corrections_plot)
+    } else {
+        list("control_standards" = NULL,
+             "corrections_plot" = ggplot()+annotate("text",x=0,y=0,label="No Control (i.e., QA/QC) Standards Found.",color="red")+theme_void())
+    }
+        
+}
+
+derivatization_correction <- function(corrected_data,derivatization_lookup,derivative_dD,derivative_dD_uncertainty) {
+    # size_variable <- ifelse(size_variable == "No size effect correction.","Peak Height (amplitude, mV)",size_variable)
+    sample_results <- corrected_data %>% filter(grepl("sample",id2)) %>% ungroup() %>% 
+        # mutate(size_unit = size_variable,
+        #        comp_size = size_value) %>% 
+        # select(row,row_base,id1,comp,class,size_group,size_unit,comp_size,size_lower,size_upper,dD_processing) %>%
+        left_join(derivatization_lookup,by=c("comp","class"))
+    
+    list("output" = sample_results)
+}
+
+# UI
+{
+    ui <- dashboardPage(
+        dashboardHeader(title = "GC-IRMS dD Processor", titleWidth = 300),
+        dashboardSidebar(
+            sidebarMenu(
+                menuItem("Ingest Data",tabName = "ingest",icon = icon("table")),
+                menuItem("Initial Diagnostic Plots",tabName = "diagplots",icon = icon("chart-line")),
+                menuItem("Processing Order",tabName = "proc_order_selection",icon = icon("list-ol")),
+                menuItem("Drift Correction",tabName = "drift_tab",icon = icon("shoe-prints")),
+                menuItem("Size Correction",tabName = "size_tab",icon = icon("signal")),
+                menuItem("Scale Normalization",tabName = "normalization_tab", icon = icon("balance-scale")),
+                menuItem("Control Standards",tabName = "corrections_tab", icon = icon("bullseye")),
+                menuItem("Derivatization",tabName = "derivatization_tab", icon = icon("vials"))
+            )
+        ),
+        dashboardBody(
+            tabItems(
+                tabItem(tabName = "ingest",
+                        fluidPage(
+                            box(title = "Select IRMS export file:",
+                                width=9,
+                                fileInput("raw_irms_file",
+                                          label = "Must be a CSV and headers need to be identified in the GCIRMS template if not an Isodat 3.0 CSV export.",
+                                          accept = c(".csv"))),
+                            column(3,
+                                infoBoxOutput("raw_irms_status",width=12),
+                                infoBoxOutput("raw_irms_check",width=12)),
+                            box(title = "Select GC-IRMS Template file:",
+                                width=10,
+                                fileInput("gcirms_template",
+                                          label = "This must follow the structure of the original template!",
+                                          accept = c(".xlsx"))),
+                            infoBoxOutput("gcirms_template_status", width = 2),
+                            box(title = "Raw IRMS Export",
+                                width=12,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("raw_irms_data"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll"),
+                            box(title = "Sample Info",
+                                width=12,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("sample_info"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll"),
+                            box(title = "Standard Info",
+                                width=12,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("standard_info"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll"),
+                            box(title = "Initial IRMS Clean-up",
+                                width=12,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("data"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                )),
+                tabItem(tabName = "diagplots",
+                        fluidPage(
+                            box(title = "IRMS Drift Based on Reference Peaks",
+                                width=4,
+                                plotOutput("plot_irms_drift")),
+                            box(title = "Peak Area to Injection Concentration",
+                                width=4,
+                                plotOutput("plot_area_curve")),
+                            box(title = "Peak Area to Injection Concentration",
+                                width=4,
+                                plotOutput("plot_ampl_curve"))
+                )),
+                tabItem(tabName = "proc_order_selection",
+                        fluidPage(
+                            box(title = "Select the order to perform corrections. Each correction can also be disabled by an option in its tab.",
+                                width=12),
+                            box(title = NULL,
+                                width=4,
+                                selectInput("first_correction",
+                                            label = "First Correction",
+                                            choices = c("Drift","Size","Scale Normalization"))),
+                            box(title = NULL,
+                                width=4,
+                                selectInput("second_correction",
+                                            label = "Second Correction",
+                                            choices = c("Drift","Size","Scale Normalization"))),
+                            box(title = NULL,
+                                width=4,
+                                selectInput("third_correction",
+                                            label = "Third Correction",
+                                            choices = c("Drift","Size","Scale Normalization")))
+                        )),
+                tabItem(tabName = "drift_tab",
+                        fluidPage(
+                            fluidRow(
+                                box(title = NULL,
+                                    width = 6,
+                                    radioButtons("drift_option",
+                                                 label = "Select the drift type to apply:",
+                                                 choices = c("Linear interpolation between adjacent drift samples (use this when drift appears non-linear)",
+                                                             "Linear regression across all drift samples (use this when drift appears linear)",
+                                                             "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"))),
+                                box(title = NULL,
+                                    width = 6,
+                                    radioButtons("drift_comp",
+                                              label = "Select the compound to use for drift correction:",
+                                              choices = "Mean drift of all compounds"))
+                            ),
+                            box(title = NULL,
+                                width = 4,
+                                plotOutput("drift_raw_plot")),
+                            box(title = NULL,
+                                width = 4,
+                                plotOutput("drift_corrected_standards_plot")),
+                            box(title = NULL,
+                                width = 4,
+                                plotOutput("drift_correction_by_row_plot")),
+                            box(title = "Drift Correction Output",
+                                width=12,
+                                DTOutput("drift_corrected_data"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                        )),
+                tabItem(tabName = "size_tab",
+                        fluidPage(
+                            fluidRow(
+                                box(title = NULL,
+                                    width = 6,
+                                    radioButtons("size_option",
+                                                 label = "Select the size effect independent variable to use:",
+                                                 choices = c("Peak Height (amplitude, mV)",
+                                                             "Peak Area (Vs)",
+                                                             "No size effect correction.")),
+                                    numericInput("size_cutoff",
+                                              label = "Enter a cut-off value to perform a segmented size effect correction. Leave blank to use a single regression",
+                                              value = NA,
+                                              step = 10),
+                                    radioButtons("size_small_peak_action",
+                                                 label = "Select what action to take for 'Small' size peaks.",
+                                                 choices = c("Remove observed size effect.",
+                                                             "No size effect correction.")),
+                                    radioButtons("size_normal_peak_action",
+                                                 label = "Select what action to take for 'Normal' size peaks.",
+                                                 choices = c("Remove observed size effect.",
+                                                             "No size effect correction."))),
+                                box(title = NULL,
+                                    width = 6,
+                                    radioButtons("acceptable_peak_units",label = "Select the unit for the smallest/largest peak filters.",
+                                                 choices = c("Peak Height (amplitude, mV)",
+                                                             "Peak Area (Vs)")),
+                                    numericInput("smallest_acceptable_peak",
+                                                 label = "Enter a value to remove any peak smaller than this. Leave blank to disable lower peak limit.",
+                                                 value = NA),
+                                    numericInput("largest_acceptable_peak",
+                                                 label = "Enter a value to remove any peak larger than this. Leave blank to disable upper peak limit.",
+                                                 value = NA)),
+                                box(title = NULL,
+                                    width = 3,
+                                    radioButtons("size_toosmall_peak_action",
+                                                 label = "Select what action to take for peaks smaller than the lower range of the size effect curve.",
+                                                 choices = c("Use 'Small' size effect function.",
+                                                             "No size effect correction.",
+                                                             "Remove these from results."))),
+                                box(title = NULL,
+                                    width = 3,
+                                    radioButtons("size_large_peak_action",
+                                                 label = "Select what action to take for peaks larger than the upper range of the size effect curve.",
+                                                 choices = c("Remove size effect with 'Normal' size effect function.",
+                                                             "No size effect correction.",
+                                                             "Remove these from results.")))
+                            ),
+                            box(title = NULL,
+                                width = 6,
+                                plotOutput("size_raw_grouped_plot")),
+                            box(title = NULL,
+                                width = 6,
+                                plotOutput("size_corrected_grouped_plot")),
+                            box(title = NULL,
+                                width = 12,
+                                plotOutput("size_correction_plot")),
+                            box(title = NULL,
+                                width = 12,
+                                plotOutput("size_raw_bycomp_plot")),
+                            box(title = NULL,
+                                width = 12,
+                                plotOutput("size_corrected_bycomp_plot")),
+                            box(title = "Size Correction Output",
+                                width=12,
+                                DTOutput("size_corrected_data"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                        )),
+                 tabItem(tabName = "normalization_tab",
+                        fluidPage(
+                            fluidRow(
+                                box(title = NULL,
+                                    width = 6,
+                                    radioButtons("normalization_option",
+                                                 label = "Select the desired method to perform scale normalization:",
+                                                 choices = c("Linear interpolation between adjacent normalization standards (use this if drift-correction is untenable)",
+                                                             "Linear regression across all normalization standards (use this if you drift-correct)"))),
+                                box(title = NULL,
+                                    width = 6,
+                                    checkboxGroupInput("normalization_comps",
+                                                       label = "Check at least 2 compounds to use as basis for scale normalization. If not defined in the Initials tab, the two compounds that bracket all the compounds in the scale normalization standard are used."))
+                            ),
+                            fluidRow(title = NULL,
+                                column(width=6,offset=3,align="center",plotOutput("normalization_plot",height = 600))),
+                            box(title = "Scale Normalized Output",
+                                width=12,
+                                DTOutput("scale_normalization_corrected_data"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                        )),
+                tabItem(tabName = "corrections_tab",
+                        fluidPage(
+                            box(title = NULL,
+                                width = 12,
+                                DTOutput("control_standards")),
+                            fluidRow(title = NULL,
+                                     column(width=6,offset=3,align="center",plotOutput("corrections_plot",height = 600)))
+                        )),
+                tabItem(tabName = "derivatization_tab",
+                        fluidPage(
+                            column(width = 3,
+                                   numericInput("derivative_dD",
+                                                width = '100%',
+                                                label = "Enter the determined \u03B4D of the derivative hydrogen:",
+                                                value = NA),
+                                   numericInput("derivative_dD_uncertainty",
+                                                width = '100%',
+                                                label = "Enter the uncertainty of \u03B4D of the derivative hydrogen:",
+                                                value = NA)),
+                            box(title = "Derivative Hydrogen Table",
+                                width = 9,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("derivatization_table"),
+                                style="height:250px; overflow-y: scroll;overflow-x: scroll"),
+                            box(title = "Sample Derivatization Correction",
+                                width = 12,
+                                DTOutput("sample_derivatization_table"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                        ))
+            )
+        )
+    )
+}
+
+server <- function(input, output, session) {
+   #Ingest Data Tab
+    {
+        ingest <- reactive({
+            
+            if( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {return(NULL)}
+            if (!(is.null(input$raw_irms_file) & is.null(input$gcirms_template)) & 
+                grepl("csv",input$raw_irms_file$datapath) & grepl("xlsx",input$gcirms_template$datapath)){ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)
+            }
+        })
+        
+        cal_comp_list <- reactive({
+            if(!is.null(ingest()$data)){ingest()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
+                    filter(grepl("standard",id2)) %>%
+                    select(comp_class,dD_known) %>% distinct()} else return(NULL)})
+        default_cal_comp <- reactive({
+            if(!is.null(cal_comp_list())){
+                if(anyNA(ingest()$initials$normalization_comps)){cal_comp_list() %>% filter(dD_known == max(dD_known) | dD_known == min(dD_known)) %>% .$comp_class}
+                if(!anyNA(ingest()$initials$normalization_comps)){ingest()$initials$normalization_comps}}else return(NULL)})
+
+        observe({
+            updateSelectInput(session,"first_correction",selected = ingest()$initials$first_correction[1])
+            updateSelectInput(session,"second_correction",selected = ingest()$initials$second_correction[1])
+            updateSelectInput(session,"third_correction",selected = ingest()$initials$third_correction[1])
+            updateRadioButtons(session,"drift_option",selected = ingest()$initials$drift_option[1])
+            updateRadioButtons(session,"drift_comp",selected = ingest()$initials$drift_comp[1])
+            updateRadioButtons(session,"size_option",selected = ingest()$initials$size_option[1])
+            updateNumericInput(session,"size_cutoff",value = ingest()$initials$size_cutoff[1])
+            updateRadioButtons(session,"size_toosmall_peak_action",selected = ingest()$initials$size_toosmall_peak_action[1])
+            updateRadioButtons(session,"size_small_peak_action",selected = ingest()$initials$size_small_peak_action[1])
+            updateRadioButtons(session,"size_normal_peak_action",selected = ingest()$initials$size_normal_peak_action[1])
+            updateRadioButtons(session,"size_large_peak_action",selected = ingest()$initials$size_large_peak_action[1])
+            updateRadioButtons(session,"acceptable_peak_units",selected = ingest()$initials$acceptable_peak_units[1])
+            updateNumericInput(session,"largest_acceptable_peak",value = ingest()$initials$largest_acceptable_peak[1])
+            updateNumericInput(session,"smallest_acceptable_peak",value = ingest()$initials$smallest_acceptable_peak[1])
+            updateRadioButtons(session,"normalization_option",selected = ingest()$initials$normalization_option[1])
+            updateCheckboxGroupInput(session,"normalization_comps",choices = cal_comp_list()$comp_class, selected = default_cal_comp())
+            updateNumericInput(session,"derivative_dD",value = ingest()$derivatization_table$derivative_dD[1])
+            updateNumericInput(session,"derivative_dD_uncertainty",value = ingest()$derivatization_table$derivative_dD_uncertainty[1])
+            },priority = 1)
+        
+        output$raw_irms_status <- renderInfoBox({
+            if (is.null(input$raw_irms_file)) {text = "No File Uploaded!"; use_color = "blue"}
+            else if( !grepl("csv",input$raw_irms_file$datapath) ) {text = "Raw IRMS file must be CSV!"; use_color = "red"}
+            else if (!is.null(input$raw_irms_file) & grepl("csv",input$raw_irms_file$datapath)) {text = "File Uploaded."; use_color = "green"}
+            
+            infoBox("Status:",text,icon = icon("file-alt"),color = use_color)
+        })
+        output$gcirms_template_status <- renderInfoBox({
+            if (is.null(input$gcirms_template)) {text = "No File Uploaded!"; use_color = "blue"}
+            else if( !grepl("xlsx",input$gcirms_template$datapath) ) {text = "GCIRMS Template file must be XLSX!"; use_color = "red"}
+            else if (!is.null(input$gcirms_template) & grepl("xlsx",input$gcirms_template$datapath)) {text = "File Uploaded."; use_color = "green"}
+            infoBox("Status:",text,icon = icon("file-excel"),color = use_color)
+        })
+        
+        output$raw_irms_check <- renderInfoBox({
+            if(is.null(ingest())){use_text = "Waiting for both file uploads..."; use_color = "blue"; use_icon = icon("ellipsis-h")}
+            if(isTRUE(ingest()$raw_irms_check)){use_text = "Inital File Check Passed."; use_color = "green"; use_icon = icon("check")}
+            if(is.character(ingest()$raw_irms_check)){use_text = paste("Header Mismatch: ",paste(ingest()$raw_irms_check,collapse=", ")); use_color = "red"; use_icon = icon("exclamation-triangle")}
+            infoBox("File Check:",value=use_text,icon=use_icon,color=use_color)
+        })
+        
+        output$raw_irms_data <- renderDT(ingest()$raw_irms_data,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$sample_info <- renderDT(ingest()$sample_info,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$standard_info <- renderDT(ingest()$standard_info,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space: nowrap')
+        output$data <- renderDT({ingest()$data},options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        
+    }
+   #Initial Diagnostic Plots Tab
+    {
+       output$plot_irms_drift <- renderPlot(ingest()$plot_irms_drift)
+       output$plot_area_curve <- renderPlot(ingest()$plot_area_curve)
+       output$plot_ampl_curve <- renderPlot(ingest()$plot_ampl_curve)
+   }
+   #Processing Order Tab
+    {
+        first_correction_data <- reactive({
+            if(input$first_correction == "Drift")
+                {output = if(is.null(ingest()$data)){NULL}
+                          else{drift_function(ingest()$data,input$drift_option,input$drift_comp)}}
+            if(input$first_correction == "Size")
+                {output = if(is.null(ingest()$data)){NULL}
+                          else{size_function(ingest()$data,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
+                                             input$size_toosmall_peak_action,
+                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
+            if(input$first_correction == "Scale Normalization")
+                {output = if(is.null(ingest()$data)){NULL}
+                          else{normalization_function(ingest()$data,input$normalization_option, input$normalization_comps)}}
+            output
+        })
+        second_correction_data <- reactive({
+            if(input$second_correction == "Drift")
+                {output = if(is.null(first_correction_data()$output)){NULL}
+                          else{drift_function(first_correction_data()$output,input$drift_option,input$drift_comp)}}
+            if(input$second_correction == "Size")
+                {output = if(is.null(first_correction_data()$output)){NULL}
+                          else{size_function(first_correction_data()$output,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
+                                             input$size_toosmall_peak_action,
+                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
+            if(input$second_correction == "Scale Normalization")
+                {output = if(is.null(first_correction_data()$output)){NULL}
+                          else{normalization_function(first_correction_data()$output,input$normalization_option,input$normalization_comps)}}
+            output
+        })
+        third_correction_data <- reactive({
+            if(input$third_correction == "Drift")
+                {output = if(is.null(second_correction_data()$output)){NULL}
+                          else{drift_function(second_correction_data()$output,input$drift_option,input$drift_comp)}}
+            if(input$third_correction == "Size")
+                {output = if(is.null(second_correction_data()$output)){NULL}
+                          else{size_function(second_correction_data()$output,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
+                                             input$size_toosmall_peak_action,
+                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
+            if(input$third_correction == "Scale Normalization")
+                {output = if(is.null(second_correction_data()$output)){NULL}
+                          else{normalization_function(second_correction_data()$output,input$normalization_option,input$normalization_comps)}}
+            output
+        })
+
+        drift_correction <- reactive({
+            if(input$first_correction == "Drift"){output = first_correction_data()}
+            if(input$second_correction == "Drift"){output = second_correction_data()}
+            if(input$third_correction == "Drift"){output = third_correction_data()}
+            output
+        })
+
+        size_correction <- reactive({
+            if(input$first_correction == "Size"){output = first_correction_data()}
+            if(input$second_correction == "Size"){output = second_correction_data()}
+            if(input$third_correction == "Size"){output = third_correction_data()}
+            output
+        })
+
+        normalization_correction <- reactive({
+            if(input$first_correction == "Scale Normalization"){output = first_correction_data()}
+            if(input$second_correction == "Scale Normalization"){output = second_correction_data()}
+            if(input$third_correction == "Scale Normalization"){output = third_correction_data()}
+            output
+        })
+
+        processing_order <- reactive({c(input$first_correction,input$second_correction,input$third_correction)})
+
+
+        observe({
+            second_choice = data.frame(choice = c("Drift","Size","Scale Normalization")) %>%
+                filter(choice != input$first_correction) %>%
+                .$choice
+            updateSelectInput(session,"second_correction",choices = second_choice)
+        })
+
+        observe({
+            third_choice = data.frame(choice = c("Drift","Size","Scale Normalization")) %>%
+                filter(choice != input$first_correction & choice != input$second_correction) %>%
+                .$choice
+            updateSelectInput(session,"third_correction",choices = third_choice)
+        })
+    }
+   #Drift Correction Tab
+    {
+        drift_comp_list <- reactive({
+            if(!is.null(ingest()$data)){
+                ingest()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
+                    filter(grepl("drift",id2)) %>%   # drift identification may be in id2
+                    ungroup() %>%
+                    unite(comp_class,c(comp,class),sep=" ") %>% select(comp_class) %>% distinct() %>%
+                    .$comp_class} else return(NULL)
+            })
+
+        observe({
+            x = c("Mean drift of all compounds",drift_comp_list())
+            updateRadioButtons(session,"drift_comp",choices = x,selected = ingest()$initials$drift_comp)
+        })
+
+        output$drift_raw_plot <- renderPlot(drift_correction()$drift_raw_plot)
+        output$drift_corrected_standards_plot <- renderPlot(drift_correction()$drift_corrected_standards_plot)
+        output$drift_correction_by_row_plot <- renderPlot(drift_correction()$drift_correction_by_row_plot)
+        output$drift_corrected_data <- renderDT(drift_correction()$output,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+    }
+   #Size Correction Tab
+    {
+
+       output$size_raw_bycomp_plot <- renderPlot(size_correction()$size_raw_bycomp_plot)
+       output$size_raw_grouped_plot <- renderPlot(size_correction()$size_raw_grouped_plot)
+       output$size_correction_plot <- renderPlot(size_correction()$size_correction_plot)
+       output$size_corrected_bycomp_plot <- renderPlot(size_correction()$size_corrected_bycomp_plot)
+       output$size_corrected_grouped_plot <- renderPlot(size_correction()$size_corrected_grouped_plot)
+       output$size_corrected_data <- renderDT(size_correction()$output,
+                                               options = list('lengthMenu' = JS('[[10, 25, 50, -1], [10, 25, 50, "All"]]'),
+                                                              searching= FALSE),
+                                               class = 'white-space: nowrap',
+                                               filter = "top")
+   }
+   #Scale Normalization Tab
+    {
+       output$normalization_plot <- renderPlot(normalization_correction()$normalization_plot)
+       output$scale_normalization_corrected_data <- renderDT(normalization_correction()$output,
+                                                             options = list('lengthMenu' = JS('[[10, 25, 50, -1], [10, 25, 50, "All"]]'),
+                                                                            searching= FALSE),
+                                                             class = 'white-space: nowrap',
+                                                             filter = "top")
+   }
+   #QA Performance Tab
+    {
+       control_standards <- reactive({if(!is.null(third_correction_data())){control_function(third_correction_data()$output,input$normalization_comps,processing_order())}
+           else return(NULL)})
+
+       output$control_standards <- renderDT(control_standards()$control_standards,
+                                                             options = list(dom = 't'),
+                                                             class = 'white-space: nowrap')
+       output$corrections_plot <- renderPlot(control_standards()$corrections_plot)
+
+
+   }
+   #Sample Output Tab (with Derivatization Correction)
+    {
+
+        
+        derivatization_results <- reactive({
+            derivatization_correction(third_correction_data()$output,
+                                   ingest()$derivatization_table[,1:4],
+                                   input$derivative_dD,
+                                   input$derivative_dD_uncertainty)
+        })
+        
+        output$derivatization_table <- renderDT(ingest()$derivatization_table[,1:4],options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$sample_derivatization_table <- renderDT(derivatization_results()$output,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        
+    }
+    
+}
+
+shinyApp(ui, server = server)
