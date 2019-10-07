@@ -14,9 +14,8 @@ library(DT) # tabular data is rendered via DT
 library(shiny) # shiny
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
-    
         raw_irms_data <- read.csv(raw_isodat_file) # Read in the 'raw' IRMS export
-        sample_info <- read_xlsx(gcirms_template_file,sheet="Samples",range=cell_cols("A:B")) %>%  # Read in the 'Samples' sheet
+        sample_info <- read_xlsx(gcirms_template_file,sheet="Samples",range=cell_cols("A:G")) %>%  # Read in the 'Samples' sheet
             rename(id1 = `Identifier 1`) # Change to the variable used throughout this script...
         standard_info <- read_xlsx(gcirms_template_file,sheet="Standards",range=cell_cols("A:G")) %>% rename(std_mix = `Identifier 1`) # Read in the 'Standards' sheet
         headers <- read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("B"))$export_header %>% # Vector of the headers in the raw_irms_data
@@ -24,20 +23,36 @@ ingest_function <- function(raw_isodat_file,gcirms_template_file) {
         derivatization_table <- read_xlsx(gcirms_template_file,sheet="Derivatization",range=cell_cols("A:F")) # Read in the 'Derivatization' Sheet
         initials <- read_xlsx(gcirms_template_file,sheet="Initials",range=cell_cols(c("A:B"))) %>% # Read in the 'Initials' sheet
             group_by(variable) %>% mutate(observation = 1:n()) %>% spread(variable,initial_value) # Reformat so that each initial is a variable.
+        rt_table <- read_xlsx(gcirms_template_file,sheet="Retention Times",range=cell_cols("A:C")) %>% 
+            rename(rt_table = rt,comp_rt_table = comp)
         
-        missing_headers <- names(headers[which(!(headers %in% colnames(raw_irms_data)))]) # Check for any mis-match between the 'Headers' sheet and the raw IRMS data.
+        header_mismatch <- names(headers[which(!(headers %in% colnames(raw_irms_data)))]) # A list of initially missing headers.
+        optional_headers <- c("raw_R","conc","peak","rt") # A list of optional headers.
+        missing_headers <- header_mismatch[which(!(header_mismatch %in% optional_headers))] # A list of non-optional missing headers.
+        headers_to_use <- headers[which(!(names(headers) %in% header_mismatch))] # Original header list sans *any* missing headers.
         
-        # If there are no missing headers, then go ahead with initial data processing:
+        # If there are no non-optional missing headers, then go ahead with initial data processing:
         if(length(missing_headers) == 0){
             #Data Ingestion. Yum!
             {
             rawdata <- raw_irms_data %>% # Reads in the file.
                 filter(!is.na(Row)) %>% # Remove any blank rows (sometimes caused by export weirdness).
-                rename(!!!headers) %>%  # Rename the headers we will use based on the 'Headers' sheet in the GCIRMS template.
+                rename(!!!headers_to_use) %>%  # Rename the headers we will use based on the 'Headers' sheet in the GCIRMS template.
                 mutate(row = row - min(row) + 1) %>%  # Generates a row index starting with first exported injection. This is helpful as the first few rows are usually unused warmups.
+                rowwise() %>% 
+                mutate(rt = ifelse("rt" %in% names(.),rt,NA)) %>% # Check if retention time was provided. If not, enter NA. RT is only used to assign compound names.
+                mutate(comp = ifelse("comp" %in% names(.),as.character(comp),NA)) %>% # Check if compound names are provided. If not, enter NA as a placeholder.
+                mutate(peak = ifelse("peak" %in% names(.),peak,1:n())) %>% # Check if the peak column is present. If it isn't, generate an index so the code still functions.
+                mutate(conc = ifelse("conc" %in% names(.),conc,1)) %>% # Check if concentrations were provided. If not, use '1' as the placeholder. In principle, the
+                # end-user could provide unique Identifier 1 entries for each concentration of a standard and have those match the IRMS data. This should be done if
+                # the end-user has size effect standards with varying compound concentration ratios (i.e., if each level were manually mixed rather than serially diluted)
+                mutate(raw_R = ifelse("raw_R" %in% names(.),raw_R,0)) %>% #Check if the raw element ratio was provided. If not, enter zero. The raw ratio is only used as
+                # a diagnostic plot.
+                as.data.frame() %>% # This 'turns off' the rowwise mode.
                 group_by(row,id1,id2,comp) %>% 
                 filter(peak == max(peak)) %>% # Manually added peaks are added to the end of the peak list, but with the same 'comp' value. This filters
-                # so that only the last peak of a comp is used. This behavior is only known to be true for Isodat 3.0! Issues may occur for older/other software.
+                # so that only the last peak of a comp is used. This behavior is only known to be true for Isodat 3.0! Older/other software may have distinct behavior.
+                # The safest way to ensure compatibility is to just have a single observation for each compound in each injection.
                 filter(comp != "" & comp != "-") %>% # Remove non-identified peaks.
                 select(row,id1,id2,conc,comp,rt,area,ampl,raw_R,dD_raw) %>% # Select only the headers we will use.
                 arrange(row) %>% ungroup()
@@ -52,80 +67,103 @@ ingest_function <- function(raw_isodat_file,gcirms_template_file) {
                        row_base = na.locf(row_base)) %>% # locf = last observation carried forward, this marks each subsequent injection in a series with its starting row.
                 select(-c(row_diff))
             
-            data <- full_join(rawdata,injections,by = c("row", "id1")) %>% 
-                mutate(id1 = as.character(id1),
-                       comp = as.character(comp)) %>% 
-                mutate(std_mix = ifelse(id2 == "sample",NA,id1)) %>% #id1 should be used to identify the standard mix names.
-                mutate(comp = ifelse(substr(comp,1,3)=="Ref","Ref",comp)) %>%  # Renames the reference gas pulses to just 'Ref'. This functionality is only known to work on Isodat 3.0
-                separate(comp,c("comp","class"),sep=" ",fill="right") %>% 
-                left_join(standard_info,by = c("std_mix", "comp", "class")) %>%  # Join with standard_info
-                mutate(conc = conc * relative_concentration) %>% 
-                filter(!is.na(row)) %>% 
-                mutate(dD_processing = dD_raw, # We use the 'dD_processing' variable as the placeholder for each data correction step.
-                       comp_class = paste(comp,class,sep=" ")) # This code currently assumes that compound and class uniquely identifies standards in a mix.
-            }
-            #Initial Diagnostic Plots
-            {
-                #IRMS Drift Plot
-                {
-                    irms_drift_calc <- data %>%
-                        mutate(slope = lm(dD_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to dD relationship... slope first...
-                               intercept = lm(dD_raw~raw_R)$coefficients[1], # ... then intercept
-                               rawraw_dD = raw_R * slope + intercept) %>%  # Estimate the dD of each ref peak using the above relationship.
-                        filter(grepl("Ref",comp)) %>%
-                        mutate(leftcenter_dD = rawraw_dD - mean(rawraw_dD[which(row==min(row))])) %>% # Center the extra raw 'rawraw_dD' on the first injection, so that we can see how drift proceeded.
-                        group_by(row) %>%
-                        mutate(sd = sd(leftcenter_dD)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
-                    
-                    if(length(irms_drift_calc$comp) == 0){
-                        plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,label="No Reference Gas Peaks Found.\n\nReference gas peaks should be identified and their name should start with\n'Ref' (i.e., Ref 1 or Reference 1) in the Component/comp column.",color="red")+theme_void()
-                    } else {
-                        # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "dD_raw" value that we calibrate.
-                        # As such, we do not need to correct for this drift at all. Instead, it is just a helpful visualization of how much drift the IRMS experienced during the run.
-                        # If this is huge (i.e., > 25 permil in range), then maybe it can be diagnostic of a problem...
-                        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=leftcenter_dD)) +
-                            geom_point() +
-                            labs(title = paste0("Mean Per-Injection Ref Peak SD: ",irms_drift_calc$mean_sd[1]," +/- ",irms_drift_calc$sd_sd[1],"\u2030"),
-                                 x = "Injection # in Sequence",
-                                 y = "IRMS Drift (\u2030)")    
-                        }
-                }
-                #Area/Amplitude Curves
-                {
-                    area_ampl_curve_data <- data %>% filter(grepl("size",id2) & comp != "Ref") # Grab just the size effect standards
-    
-                    if(length(area_ampl_curve_data$id1) == 0) {
-                        plot_area_curve <- ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
-                        plot_ampl_curve <- ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
-                        } else {
-                            plot_area_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=area)) +
-                                geom_point() +
-                                geom_smooth(method="lm",se=F) +
-                                facet_rep_wrap(~class+comp,nrow=2) +
-                                labs(x = "Concentration (ng / uL)",
-                                     y = "Peak Area")
-                            plot_ampl_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=ampl)) +
-                                geom_point() +
-                                geom_smooth(method="lm",se=F) +
-                                facet_rep_wrap(~class+comp,nrow=2) +
-                                labs(x = "Concentration (ng / uL)",
-                                     y = "Peak Amplitude")
-                    }
-                }
+            compounds <- rawdata %>% mutate(dummy=T) %>% 
+                full_join(rt_table %>% mutate(dummy=T),by="dummy") %>% 
+                group_by(row,rt) %>% 
+                mutate(rt_diff = abs(rt - rt_table)) %>% 
+                group_by(rt_table,window) %>% 
+                filter(rt_diff < window) %>% 
+                group_by(row,comp_rt_table) %>% 
+                mutate(closest_RT = ifelse(rt_diff == min(rt_diff),T,F)) %>% 
+                filter(closest_RT) %>% 
+                select(row,id1,id2,rt,comp_rt_table)
+            
+            output <- full_join(rawdata,injections,by = c("row", "id1")) %>% 
+                rename(comp_irms_output = comp) %>% 
+                full_join(compounds,by=c("row","id1","id2","rt"))
             }
         
             list("raw_irms_check" = T,
                  "raw_irms_data" = raw_irms_data,
                  "sample_info" = sample_info,
                  "standard_info" = standard_info,
-                 "plot_irms_drift" = plot_irms_drift,
-                 "plot_area_curve" = plot_area_curve,
-                 "plot_ampl_curve" = plot_ampl_curve,
                  "derivatization_table" = derivatization_table,
                  "initials" = initials,
-                 "data" = data)
+                 "rt_table" = rt_table,
+                 "output" = output)
         } else # Otherwise, check for missing headers and list them as the only output.
         if(length(missing_headers) > 0){list("raw_irms_check" = missing_headers)}
+}
+
+comp_assign_function <- function(input,standard_info,compound_option) {
+    
+    compound_action <- ifelse(compound_option == "Assigned by IRMS export in Component/comp column.","comp_irms_output",
+                       ifelse(compound_option == "Assigned by retention time matching with Retention Times sheet.","comp_rt_table",
+                              "compound_option in comp_assign_function broken! Check that the radioButton choices still match!"))
+    
+    data <- input %>% 
+        gather(compound_option,comp,comp_irms_output,comp_rt_table) %>% 
+        filter(compound_option %in% compound_action) %>% 
+        distinct() %>% 
+        select(-compound_option) %>% 
+        mutate(id1 = as.character(id1),
+               comp = as.character(comp)) %>% 
+        mutate(std_mix = ifelse(id2 == "sample",NA,id1)) %>% #id1 should be used to identify the standard mix names.
+        separate(comp,c("comp","class"),sep=" ",fill="right") %>% 
+        left_join(standard_info,by = c("std_mix", "comp", "class")) %>%  # Join with standard_info
+        mutate(conc = conc * relative_concentration) %>% 
+        filter(!is.na(row)) %>% 
+        mutate(dD_processing = dD_raw, # We use the 'dD_processing' variable as the placeholder for each data correction step.
+               comp_class = paste(comp,class,sep=" ")) # This code currently assumes that compound and class uniquely identifies standards in a mix.
+
+    #IRMS Drift Plot
+    irms_drift_calc <- data %>%
+        mutate(slope = lm(dD_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to dD relationship... slope first...
+               intercept = lm(dD_raw~raw_R)$coefficients[1], # ... then intercept
+               rawraw_dD = raw_R * slope + intercept) %>%  # Estimate the dD of each ref peak using the above relationship.
+        filter(grepl("Ref",comp)) %>%
+        mutate(leftcenter_dD = rawraw_dD - mean(rawraw_dD[which(row==min(row))])) %>% # Center the extra raw 'rawraw_dD' on the first injection, so that we can see how drift proceeded.
+        group_by(row) %>%
+        mutate(sd = sd(leftcenter_dD)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
+    
+    if(length(irms_drift_calc$comp) == 0){
+        plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,label="No Reference Gas Peaks Found.\n\nReference gas peaks should be identified and their name should start with\n'Ref' (i.e., Ref 1 or Reference 1) in the Component/comp column.",color="red")+theme_void()
+    } else {
+        # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "dD_raw" value that we calibrate.
+        # As such, we do not need to correct for this drift at all. Instead, it is just a helpful visualization of how much drift the IRMS experienced during the run.
+        # If this is huge (i.e., > 25 permil in range), then maybe it can be diagnostic of a problem...
+        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=leftcenter_dD)) +
+            geom_point() +
+            labs(title = paste0("Mean Per-Injection Ref Peak SD: ",irms_drift_calc$mean_sd[1]," +/- ",irms_drift_calc$sd_sd[1],"\u2030"),
+                 x = "Injection # in Sequence",
+                 y = "IRMS Drift (\u2030)")    
+    }
+
+    #Area/Amplitude Curves
+    area_ampl_curve_data <- data %>% filter(grepl("size",id2) & comp != "Ref") # Grab just the size effect standards
+    
+    if(length(area_ampl_curve_data$id1) == 0) {
+        plot_area_curve <- ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
+        plot_ampl_curve <- ggplot()+annotate("text",x=0,y=0,label="No Size Effect Standards Found.",color="red")+theme_void()
+    } else {
+        plot_area_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=area)) +
+            geom_point() +
+            geom_smooth(method="lm",se=F) +
+            facet_rep_wrap(~class+comp,nrow=2) +
+            labs(x = "Concentration (ng / uL)",
+                 y = "Peak Area")
+        plot_ampl_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=ampl)) +
+            geom_point() +
+            geom_smooth(method="lm",se=F) +
+            facet_rep_wrap(~class+comp,nrow=2) +
+            labs(x = "Concentration (ng / uL)",
+                 y = "Peak Amplitude")
+    }
+        
+    list("data" = data,                 
+         "plot_irms_drift" = plot_irms_drift,
+         "plot_area_curve" = plot_area_curve,
+         "plot_ampl_curve" = plot_ampl_curve)
 }
 
 drift_function <- function(input,drift_option,drift_comp) {
@@ -566,7 +604,7 @@ derivatization_correction <- function(corrected_data,derivatization_lookup,deriv
         dashboardSidebar(
             sidebarMenu(
                 menuItem("Ingest Data",tabName = "ingest",icon = icon("table")),
-                menuItem("Initial Diagnostic Plots",tabName = "diagplots",icon = icon("chart-line")),
+                menuItem("Peaks & Diagnostics",tabName = "diagplots",icon = icon("chart-line")),
                 menuItem("Processing Order",tabName = "proc_order_selection",icon = icon("list-ol")),
                 menuItem("Drift Correction",tabName = "drift_tab",icon = icon("shoe-prints")),
                 menuItem("Size Correction",tabName = "size_tab",icon = icon("signal")),
@@ -615,11 +653,29 @@ derivatization_correction <- function(corrected_data,derivatization_lookup,deriv
                                 width=12,
                                 collapsible = T,
                                 collapsed = T,
-                                DTOutput("data"),
+                                DTOutput("ingestdata"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll")
                 )),
                 tabItem(tabName = "diagplots",
                         fluidPage(
+                            box(title = NULL,
+                                width=6,
+                                selectInput("compound_option",
+                                            label = "Select how to assign compound names to peaks:",
+                                            choices = c("Assigned by IRMS export in Component/comp column.",
+                                                        "Assigned by retention time matching with Retention Times sheet."))),
+                            box(title="Retention Times",
+                                width=6,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("rt_table"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll"),
+                            box(title="Uncorrected IRMS Data with Peak Assignments",
+                                width=12,
+                                collapsible = T,
+                                collapsed = T,
+                                DTOutput("data"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll"),
                             box(title = "IRMS Drift Based on Reference Peaks",
                                 width=4,
                                 plotOutput("plot_irms_drift")),
@@ -816,7 +872,7 @@ server <- function(input, output, session) {
         })
         
         cal_comp_list <- reactive({
-            if(!is.null(ingest()$data)){ingest()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
+            if(!is.null(ingest()$output)){data()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
                     filter(grepl("standard",id2)) %>%
                     select(comp_class,dD_known) %>% distinct()} else return(NULL)})
         default_cal_comp <- reactive({
@@ -844,6 +900,7 @@ server <- function(input, output, session) {
             updateNumericInput(session,"derivative_dD",value = ingest()$derivatization_table$derivative_dD[1])
             updateNumericInput(session,"derivative_dD_uncertainty",value = ingest()$derivatization_table$derivative_dD_uncertainty[1])
             },priority = 1)
+        observe({updateSelectInput(session,"compound_option",selected = ingest()$initials$compound_option[1])})
         
         output$raw_irms_status <- renderInfoBox({
             if (is.null(input$raw_irms_file)) {text = "No File Uploaded!"; use_color = "blue"}
@@ -869,29 +926,32 @@ server <- function(input, output, session) {
         output$raw_irms_data <- renderDT(ingest()$raw_irms_data,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         output$sample_info <- renderDT(ingest()$sample_info,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         output$standard_info <- renderDT(ingest()$standard_info,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space: nowrap')
-        output$data <- renderDT({ingest()$data},options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$ingestdata <- renderDT({ingest()$output},options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         
     }
-   #Initial Diagnostic Plots Tab
+   # Compound Assignment & Initial Diagnostic Plots Tab
     {
-       output$plot_irms_drift <- renderPlot(ingest()$plot_irms_drift)
-       output$plot_area_curve <- renderPlot(ingest()$plot_area_curve)
-       output$plot_ampl_curve <- renderPlot(ingest()$plot_ampl_curve)
+        data <- reactive({if(is.null(ingest()$output)){NULL}else{comp_assign_function(ingest()$output,ingest()$standard_info,input$compound_option)}})
+        output$rt_table <- renderDT(ingest()$rt_table,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$data <- renderDT(data()$data,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$plot_irms_drift <- renderPlot(data()$plot_irms_drift)
+        output$plot_area_curve <- renderPlot(data()$plot_area_curve)
+        output$plot_ampl_curve <- renderPlot(data()$plot_ampl_curve)
    }
    #Processing Order Tab
     {
         first_correction_data <- reactive({
             if(input$first_correction == "Drift")
-                {output = if(is.null(ingest()$data)){NULL}
-                          else{drift_function(ingest()$data,input$drift_option,input$drift_comp)}}
+                {output = if(is.null(ingest()$output)){NULL}
+                          else{drift_function(data()$data,input$drift_option,input$drift_comp)}}
             if(input$first_correction == "Size")
-                {output = if(is.null(ingest()$data)){NULL}
-                          else{size_function(ingest()$data,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
+                {output = if(is.null(ingest()$output)){NULL}
+                          else{size_function(data()$data,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
                                              input$size_toosmall_peak_action,
                                              input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
             if(input$first_correction == "Scale Normalization")
-                {output = if(is.null(ingest()$data)){NULL}
-                          else{normalization_function(ingest()$data,input$normalization_option, input$normalization_comps)}}
+                {output = if(is.null(ingest()$output)){NULL}
+                          else{normalization_function(data()$data,input$normalization_option, input$normalization_comps)}}
             output
         })
         second_correction_data <- reactive({
@@ -964,8 +1024,8 @@ server <- function(input, output, session) {
    #Drift Correction Tab
     {
         drift_comp_list <- reactive({
-            if(!is.null(ingest()$data)){
-                ingest()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
+            if(!is.null(ingest()$output)){
+                data()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
                     filter(grepl("drift",id2)) %>%   # drift identification may be in id2
                     ungroup() %>%
                     unite(comp_class,c(comp,class),sep=" ") %>% select(comp_class) %>% distinct() %>%
