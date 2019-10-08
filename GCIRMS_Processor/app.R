@@ -13,6 +13,27 @@ library(shinydashboard) # shiny
 library(DT) # tabular data is rendered via DT
 library(shiny) # shiny
 
+# #testing
+# {
+#     raw_isodat_file = "(H2 Export).csv"
+#     gcirms_template_file = "GCIRMS Template.xlsx"
+#     compound_option = "Assigned by IRMS export in Component/comp column."
+#     drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+#     drift_comp = "Mean drift of all compounds"
+#     size_option = "Peak Height (amplitude, mV)"
+#     size_cutoff = 3300
+#     size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+#     size_small_peak_action = "Remove size effect with 'Small' size effect function."
+#     size_toosmall_peak_action = "Remove these from results."
+#     size_large_peak_action = "No size effect correction."
+#     acceptable_peak_units = "Peak Height (amplitude, mV)"
+#     largest_acceptable_peak = NA
+#     smallest_acceptable_peak = NA
+#     normalization_option = "Linear interpolation between adjacent normalization standards"
+#     normalization_comps = c("C20 FAME", "C31 Alkane")
+#     
+# }
+
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
         raw_irms_data <- read.csv(raw_isodat_file) # Read in the 'raw' IRMS export
         sample_info <- read_xlsx(gcirms_template_file,sheet="Samples",range=cell_cols("A:G")) %>%  # Read in the 'Samples' sheet
@@ -586,7 +607,7 @@ control_function <- function(input,normalization_comps,processing_order) {
         
 }
 
-derivatization_correction <- function(corrected_data,derivatization_lookup,derivative_dD,derivative_dD_uncertainty) {
+derivatization_correction <- function(input,derivatization_lookup,derivative_dD,derivative_dD_uncertainty) {
     # size_variable <- ifelse(size_variable == "No size effect correction.","Peak Height (amplitude, mV)",size_variable)
     sample_results <- corrected_data %>% filter(grepl("sample",id2)) %>% ungroup() %>% 
         # mutate(size_unit = size_variable,
@@ -595,6 +616,10 @@ derivatization_correction <- function(corrected_data,derivatization_lookup,deriv
         left_join(derivatization_lookup,by=c("comp","class"))
     
     list("output" = sample_results)
+}
+
+final_sample_function <- function(input,qaqc_error) {
+    
 }
 
 # UI
