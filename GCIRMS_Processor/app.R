@@ -600,7 +600,7 @@ derivatization_correction <- function(corrected_data,derivatization_lookup,deriv
 # UI
 {
     ui <- dashboardPage(
-        dashboardHeader(title = "GC-IRMS dD Processor", titleWidth = 300),
+        dashboardHeader(title = "GC-IRMS \u03B4D"),
         dashboardSidebar(
             sidebarMenu(
                 menuItem("Ingest Data",tabName = "ingest",icon = icon("table")),
@@ -617,6 +617,12 @@ derivatization_correction <- function(corrected_data,derivatization_lookup,deriv
             tabItems(
                 tabItem(tabName = "ingest",
                         fluidPage(
+                            box(title = h1("Shiny Post-Processor: Compound Specific \u03B4D via GC-HTC-IRMS", strong("(expand for instructions!)")),
+                                solidHeader=T,
+                                width=12,
+                                collapsible = T,
+                                collapsed = T,
+                                uiOutput("introduction")),
                             box(title = "Select IRMS export file:",
                                 width=9,
                                 fileInput("raw_irms_file",
@@ -863,6 +869,31 @@ derivatization_correction <- function(corrected_data,derivatization_lookup,deriv
 server <- function(input, output, session) {
    #Ingest Data Tab
     {
+        output$introduction <- renderUI({
+            tagList(
+                p("Source code, template, and example data can be found at ",a("on Github.",href="https://github.com/JackAHutchings/Shiny-Post-Processor")),
+                h4("Sequence Construction"),
+                p("1) When setting up your sample sequence, you *must* reserve two columns for 'Identifier 1' and 'Identifier 2'. This script uses Identifier 1 to establish
+                  either the standard mixture or the sample name. Identifier 2 is reserved and must be used to describe the role of the injection. The following roles are
+                  understood:"),
+                tags$ul(
+                    tags$li("sample (unknown)"),
+                    tags$li("standard (scale normalization standard)"),
+                    tags$li("control (known standard to estimate accuracy)"),
+                    tags$li("drift (account for instrument drift)"),
+                    tags$li("size (peak size to isotope ratio correction)"),
+                    tags$li("derivatization (estimate composition of added hydrogen during derivatization)"),
+                    tags$li("warm-up (discarded injections)")
+                    ),
+                p("Standards may serve multiple roles (i.e, drift and control) that should be separated by an underscore (i.e., drift_control) in Identifier 2.
+                  If a standard is assigned both the standard and control role (i.e., standard_control), then the compounds selected for scale normalization will be
+                  excluded from use as control standards. Only sample and standard roles are required to be used. If you have pre-determined your derivative hydrogen, 
+                  the known value can be entered in the Excel template file (see below)"),
+                p("2) A third (optional) input column is 'Preparation'. This column is used to indicate the concentration ( ng/\u03BCL ) of a standard. This is only
+                  necessary if size correction is desired or if multiple concentrations of one of the other standards are used. Sample concentration is not interpreted.")
+            )
+        })
+        
         ingest <- reactive({
             
             if( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {return(NULL)}
