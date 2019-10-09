@@ -646,7 +646,7 @@ final_sample_function <- function(input,qaqc_error) {
                                 solidHeader=T,
                                 width=12,
                                 collapsible = T,
-                                collapsed = T,
+                                collapsed = F,
                                 uiOutput("introduction")),
                             box(title = "Select IRMS export file:",
                                 width=9,
@@ -896,26 +896,49 @@ server <- function(input, output, session) {
     {
         output$introduction <- renderUI({
             tagList(
-                p("Source code, template, and example data can be found at ",a("on Github.",href="https://github.com/JackAHutchings/Shiny-Post-Processor")),
-                h4("Sequence Construction"),
-                p("1) When setting up your sample sequence, you *must* reserve two columns for 'Identifier 1' and 'Identifier 2'. This script uses Identifier 1 to establish
-                  either the standard mixture or the sample name. Identifier 2 is reserved and must be used to describe the role of the injection. The following roles are
-                  understood:"),
+                p("Source code, template, and example data can be found ",a("on Github.",href="https://github.com/JackAHutchings/Shiny-Post-Processor")," For development questions/bug
+                  reports contact the author, Jack Hutchings, via Github."),
+                h3("Sequence Construction"),
+                p("When setting up your sample sequence, you *must* reserve two columns for 'Identifier 1' and 'Identifier 2'. A third, optional column, is 'Preparation'."
+                  ,style = "padding-left:2em"),
+                p(strong("Identifier 1:")," This is the primary identifier of the vial you are injecting. If the vial is a standard, then there should be matching entries in your
+                  template file (Standards sheet; see below) to fill in known values. If the vial is a sample, then this can be whatever value you desire. However, if you are
+                  using the optional Samples sheet in the template file, then you'll want these to match so you have proper metadata.",style = "padding-left:2em"),
+                p(strong("Identifier 2:")," This is reserved (i.e., should only contain values as stated here) and must be used to describe the role of the injection. The 
+                  following roles are understood:",style = "padding-left:2em"),
                 tags$ul(
-                    tags$li("sample (unknown)"),
-                    tags$li("standard (scale normalization standard)"),
-                    tags$li("control (known standard to estimate accuracy)"),
-                    tags$li("drift (account for instrument drift)"),
-                    tags$li("size (peak size to isotope ratio correction)"),
-                    tags$li("derivatization (estimate composition of added hydrogen during derivatization)"),
-                    tags$li("warm-up (discarded injections)")
+                    tags$li("sample (unknown)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
+                    tags$li("standard (scale normalization standard)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
+                    tags$li("control (known standard to estimate accuracy)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
+                    tags$li("drift (account for instrument drift)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
+                    tags$li("size (peak size to isotope ratio correction)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
+                    tags$li("derivatization (calculate added hydrogen during derivatization)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
+                    tags$li("warm-up (discarded injections)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;")
                     ),
                 p("Standards may serve multiple roles (i.e, drift and control) that should be separated by an underscore (i.e., drift_control) in Identifier 2.
                   If a standard is assigned both the standard and control role (i.e., standard_control), then the compounds selected for scale normalization will be
                   excluded from use as control standards. Only sample and standard roles are required to be used. If you have pre-determined your derivative hydrogen, 
-                  the known value can be entered in the Excel template file (see below)"),
-                p("2) A third (optional) input column is 'Preparation'. This column is used to indicate the concentration ( ng/\u03BCL ) of a standard. This is only
-                  necessary if size correction is desired or if multiple concentrations of one of the other standards are used. Sample concentration is not interpreted.")
+                  the known value can be entered in the Excel template file (see below)",style = "padding-left:2em"),
+                p(strong("Preparation:")," (optional) This column is used to indicate the concentration ( ng/\u03BCL ) of a vial. This is only necessary if size correction is desired 
+                  or if multiple concentrations of one of the other standards are used. Sample concentration is not interpreted.",style = "padding-left:2em"),
+                h3("GCIRMS Template Completion"),
+                p("The Microsoft Excel template file can be found at",a("this app's Github repository.",href="https://github.com/JackAHutchings/Shiny-Post-Processor/tree/master/GCIRMS_Processor"),
+                  " The file contains instructions (spreadsheet cells with bright yelow backgrounds), but general usage of each 'Sheet' within the file is described at follows:",
+                  style = "padding-left:2em"),
+                p(strong("Sequence Table:")," The sequence table is optional and designed specifically for copy/pasting into an Isodat 3.0 GC Isolink II Sequence file. If you are running 
+                  an older version or some other software, this template will not be particularly useful. However, the app does not use this sheet, so you may delete it or replace it with 
+                  a template of your own.",style = "padding-left:2em"),
+                p(strong("Samples:")," The samples sheet is also optional. If used, the 'Identifier 1' column should match 'Identifier 1' in your sequence table and IRMS output. The remaining
+                  columns (B through G) can have their headers changed and contents filled with whatever sample metadata you require.",style = "padding-left:2em"),
+                p(strong("Standards:"), " This sheet is required. Standards with known compositions (scale normalization and controls) must have their known values entered here. You may enter
+                  as many standards as you desire; only those with matching Identifier 1 values will be used by the script. If a standard contains compounds at different concentrations,
+                  then their concentation relative to 'Preparation' in your Sequence Table/IRMS Export should be entered here. If you don't have or want to use a 'Preparation' column, the actual
+                  concentrations could be entered here. To have a standard at multiple concentrations (e.g., your peak size effect standard), you would need each concentration level to have its
+                  own Identifier 1 and concentration information entered in relative_concentration.",style = "padding-left:2em"),
+                p(strong("Headers:")," This sheet informs the app what the actual header values are in your IRMS export file. Some of these are optional, but for full functionality it is
+                  recommended to include as many as you have available. If you are exporting using Isodat 3.0 as a CSV, then you only need to select the correct headers in your export template,
+                  as the values here match those. If you are using older/other software, you will likely need to identify each column and provide the correct header in your IRMS export file.",
+                  style = "padding-left:2em")
             )
         })
         
