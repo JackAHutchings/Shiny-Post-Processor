@@ -635,10 +635,10 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
                        errors = paste0(error_counts,error_known,error_known_sd),
                        derivatization_filter = "inrun") %>% 
                 group_by(derivatization_filter,errors) %>% 
-                summarize(derivative_dD_inrun_mean = mean(derivative_dD_inrun),
+                summarize(derivative_dD_inrun_mean = round(mean(derivative_dD_inrun),1),
                           derivative_dD_inrun_precision = sd(derivative_dD_inrun),
                           derivative_dD_inrun_knownerror = mean(dD_known_sd),
-                          derivative_dD_inrun_uncertainty = sqrt(derivative_dD_inrun_precision^2 + derivative_dD_inrun_knownerror^2)) %>% 
+                          derivative_dD_inrun_uncertainty = round(sqrt(derivative_dD_inrun_precision^2 + derivative_dD_inrun_knownerror^2),1)) %>% 
                 rename(derivative_dD = derivative_dD_inrun_mean,
                        derivative_dD_uncertainty = derivative_dD_inrun_uncertainty) %>% 
                 select(derivative_dD,derivative_dD_uncertainty,derivatization_filter,errors)
@@ -947,11 +947,11 @@ final_sample_function <- function(input,qaqc_error) {
                                 width = 12,
                                 collapsible = T,
                                 collapsed = F,
-                                DTOutput("derivative_dD_selected"),
-                                style="height:250px; overflow-y: scroll;overflow-x: scroll"),
+                                tableOutput("derivative_dD_selected"),
                             box(title = "Sample Derivatization Correction",
                                 width = 12,
-                                DTOutput("sample_derivatization_table"))
+                                DTOutput("sample_derivatization_table"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll"))
                         ))
             )
         )
@@ -1264,7 +1264,7 @@ server <- function(input, output, session) {
         })
         
         output$derivatization_table <- renderDT(ingest()$derivatization_table[,1:4],options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
-        output$derivative_dD_selected <- renderDT(derivatization_results()$derivative_dD_selected,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$derivative_dD_selected <- renderTable(derivatization_results()$derivative_dD_selected)
         output$sample_derivatization_table <- renderDT(derivatization_results()$output,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         
     }
