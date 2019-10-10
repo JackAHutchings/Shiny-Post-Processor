@@ -13,26 +13,27 @@ library(shinydashboard) # shiny
 library(DT) # tabular data is rendered via DT
 library(shiny) # shiny
 
-# #testing
-# {
-#     raw_isodat_file = "(H2 Export).csv"
-#     gcirms_template_file = "GCIRMS Template.xlsx"
-#     compound_option = "Assigned by IRMS export in Component/comp column."
-#     drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-#     drift_comp = "Mean drift of all compounds"
-#     size_option = "Peak Height (amplitude, mV)"
-#     size_cutoff = 3300
-#     size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
-#     size_small_peak_action = "Remove size effect with 'Small' size effect function."
-#     size_toosmall_peak_action = "Remove these from results."
-#     size_large_peak_action = "No size effect correction."
-#     acceptable_peak_units = "Peak Height (amplitude, mV)"
-#     largest_acceptable_peak = NA
-#     smallest_acceptable_peak = NA
-#     normalization_option = "Linear interpolation between adjacent normalization standards"
-#     normalization_comps = c("C20 FAME", "C31 Alkane")
-#     
-# }
+#testing
+{
+    raw_isodat_file = "(H2 Export).csv"
+    gcirms_template_file = "GCIRMS Template - Phthalic Acid.xlsx"
+    compound_option = "Assigned by IRMS export in Component/comp column."
+    drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+    drift_comp = "Mean drift of all compounds"
+    size_option = "Peak Height (amplitude, mV)"
+    size_cutoff = 3300
+    size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+    size_small_peak_action = "Remove size effect with 'Small' size effect function."
+    size_toosmall_peak_action = "Remove these from results."
+    size_large_peak_action = "No size effect correction."
+    acceptable_peak_units = "Peak Height (amplitude, mV)"
+    largest_acceptable_peak = NA
+    smallest_acceptable_peak = NA
+    normalization_option = "Linear interpolation between adjacent normalization standards"
+    normalization_comps = c("C20 FAME", "C31 Alkane")
+    derivatization_option = "Template-defined derivative \u03B4D."
+
+}
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
     
@@ -133,13 +134,13 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         select(-compound_option) %>% 
         mutate(id1 = as.character(id1),
                comp = as.character(comp)) %>% 
-        mutate(std_mix = ifelse(id2 == "sample",NA,id1)) %>% #id1 should be used to identify the standard mix names.
+        mutate(std_mix = ifelse(id2 == "sample" | id2 == "derivatization",NA,id1)) %>% #id1 should be used to identify the standard mix names.
         separate(comp,c("comp","class"),sep=" ",fill="right") %>% 
         left_join(standard_info,by = c("std_mix", "comp", "class")) %>%  # Join with standard_info
         mutate(conc = conc * relative_concentration) %>% 
         filter(!is.na(row)) %>% 
-        mutate(dD_processing = dD_raw, # We use the 'dD_processing' variable as the placeholder for each data correction step.
-               comp_class = paste(comp,class,sep=" ")) # This code currently assumes that compound and class uniquely identifies standards in a mix.
+        mutate(dD_processing = dD_raw) %>%  # We use the 'dD_processing' variable as the placeholder for each data correction step.
+        unite(comp_class,c(comp,class),sep=" ",remove=F,na.rm=T) # This code currently assumes that compound and class uniquely identifies standards in a mix.
 
     #IRMS Drift Plot
     irms_drift_calc <- data %>%
@@ -583,7 +584,9 @@ control_function <- function(input,normalization_comps,processing_order) {
             mutate(label = paste0("Step ",order,": ",proc_label)) %>% 
             arrange(order)
         
-        correction_visual_plot <- input %>% filter(!is.na(dD_known)) %>% 
+        correction_visual_plot <- input %>% 
+            filter(!is.na(dD_known)) %>% 
+            filter(!grepl("derivatization",id2)) %>% 
             gather(dD_type,value,dD_raw,dD_drift,dD_size,dD_normalization) %>% 
             mutate(dD_type = factor(dD_type,levels=proc_table$levels,ordered=T,
                                     labels=proc_table$label)) %>% 
@@ -611,15 +614,68 @@ control_function <- function(input,normalization_comps,processing_order) {
         
 }
 
-derivatization_correction <- function(input,derivatization_lookup,derivative_dD,derivative_dD_uncertainty) {
-    # size_variable <- ifelse(size_variable == "No size effect correction.","Peak Height (amplitude, mV)",size_variable)
-    sample_results <- corrected_data %>% filter(grepl("sample",id2)) %>% ungroup() %>% 
-        # mutate(size_unit = size_variable,
-        #        comp_size = size_value) %>% 
-        # select(row,row_base,id1,comp,class,size_group,size_unit,comp_size,size_lower,size_upper,dD_processing) %>%
-        left_join(derivatization_lookup,by=c("comp","class"))
+derivatization_correction <- function(input,derivatization_table,derivatization_option) {
     
-    list("output" = sample_results)
+    if(!is.null(input)){
+        derivative_check <- input %>% filter(grepl("derivatization",id2))
+        
+        derivatization_option = ifelse(derivatization_option == "Template-defined derivative \u03B4D.","template",
+                                ifelse(derivatization_option == "Derivatization standard in sequence \u03B4D.","inrun",
+                                ifelse(derivatization_option == "Do not correct for derivative hydrogen.","disabled",
+                                       "derivatization_option in derivatization_correction broken! Check that the radioButton choices still match!")))
+        
+        if(length(derivative_check$id2) > 0) {
+            inrun <- derivative_check %>% left_join(derivatization_table[,1:4],by = c("comp","class")) %>% 
+                ungroup() %>% 
+                mutate(total_hydrogen_count = bound_hydrogen_count + derivative_hydrogen_count,
+                       derivative_dD_inrun = (total_hydrogen_count*dD_processing - bound_hydrogen_count*dD_known) / derivative_hydrogen_count,
+                       error_counts = ifelse(anyNA(total_hydrogen_count),"[ No match found for derivatization standard in Derivatization Table sheet! ]",""),
+                       error_known = ifelse(anyNA(dD_known),"[ No match found for derivatization standard in Standards sheet! ]",""),
+                       error_known_sd = ifelse(anyNA(dD_known_sd) & is.null(error_known),"[ Missing uncertainty of known value for derivatization standard in Standards sheet!",""),
+                       errors = paste0(error_counts,error_known,error_known_sd),
+                       derivatization_filter = "inrun") %>% 
+                group_by(derivatization_filter,errors) %>% 
+                summarize(derivative_dD_inrun_mean = mean(derivative_dD_inrun),
+                          derivative_dD_inrun_precision = sd(derivative_dD_inrun),
+                          derivative_dD_inrun_knownerror = mean(dD_known_sd),
+                          derivative_dD_inrun_uncertainty = sqrt(derivative_dD_inrun_precision^2 + derivative_dD_inrun_knownerror^2)) %>% 
+                rename(derivative_dD = derivative_dD_inrun_mean,
+                       derivative_dD_uncertainty = derivative_dD_inrun_uncertainty) %>% 
+                select(derivative_dD,derivative_dD_uncertainty,derivatization_filter,errors)
+        } else {
+            inrun <- data.frame(derivative_dD = NA,
+                                derivative_dD_uncertainty = NA,
+                                derivatization_filter = "inrun",
+                                errors = "[ No derivatization standards identified in Identifier 2! ]")
+        }
+        
+        derivatives_to_use <- derivatization_table[1,c(5:6)] %>% 
+            mutate(derivatization_filter = "template",
+                   derivative_dD_error = ifelse(is.na(derivative_dD),"[ Missing derivative_dD in Derivatization sheet! ]",""),
+                   derivative_dD_uncertainty_error = ifelse(is.na(derivative_dD_uncertainty),"[ Missing derivative_dD_uncertainty in Derivatization sheet! ]",""),
+                   errors = paste0(derivative_dD_error,derivative_dD_uncertainty_error)) %>% 
+            select(-c(derivative_dD_error,derivative_dD_uncertainty_error)) %>% 
+            rbind(inrun) %>% 
+            rbind(data.frame(derivative_dD = NA, derivative_dD_uncertainty = NA, derivatization_filter = "disabled",errors = "")) %>% 
+            filter(derivatization_filter %in% derivatization_option)
+        
+        sample_results <- left_join(input,derivatization_table[,1:4],by = c("comp", "class")) %>% 
+            group_by(row,comp,class) %>% 
+            mutate(derivative_dD = as.numeric(derivatives_to_use$derivative_dD),
+                   derivative_dD_uncertainty = as.numeric(derivatives_to_use$derivative_dD_uncertainty)) %>% 
+            mutate(bound_hydrogen_count = ifelse(is.na(bound_hydrogen_count),1,bound_hydrogen_count),
+                   derivative_hydrogen_count = ifelse(is.na(derivative_hydrogen_count),0,derivative_hydrogen_count),
+                   total_hydrogen_count = bound_hydrogen_count + derivative_hydrogen_count,
+                   final_dD = (total_hydrogen_count*dD_processing - derivative_hydrogen_count*derivative_dD)/bound_hydrogen_count,
+                   final_dD = ifelse(derivatization_option == "disabled",dD_processing,final_dD),
+                   final_dD = ifelse(id2 == "sample",final_dD,dD_processing))
+        
+        list("output" = sample_results,
+             "derivative_dD_selected" = derivatives_to_use)
+    } else {
+        list("output" = NULL,
+             "derivative_dD_selected" = NULL)
+    }
 }
 
 final_sample_function <- function(input,qaqc_error) {
@@ -874,25 +930,28 @@ final_sample_function <- function(input,qaqc_error) {
                         )),
                 tabItem(tabName = "derivatization_tab",
                         fluidPage(
-                            column(width = 3,
-                                   numericInput("derivative_dD",
-                                                width = '100%',
-                                                label = "Enter the determined \u03B4D of the derivative hydrogen:",
-                                                value = NA),
-                                   numericInput("derivative_dD_uncertainty",
-                                                width = '100%',
-                                                label = "Enter the uncertainty of \u03B4D of the derivative hydrogen:",
-                                                value = NA)),
+                            box(title = NULL,
+                                width = 3,
+                                radioButtons("derivatization_option",
+                                             label = "Select the desired source of the derivative hydrogen \u03B4D:",
+                                             choices = c("Template-defined derivative \u03B4D.",
+                                                         "Derivatization standard in sequence \u03B4D.",
+                                                         "Do not correct for derivative hydrogen."))),
                             box(title = "Derivative Hydrogen Table",
                                 width = 9,
                                 collapsible = T,
                                 collapsed = T,
                                 DTOutput("derivatization_table"),
                                 style="height:250px; overflow-y: scroll;overflow-x: scroll"),
+                            box(title = "Selected Derivative \u03B4D Values",
+                                width = 12,
+                                collapsible = T,
+                                collapsed = F,
+                                DTOutput("derivative_dD_selected"),
+                                style="height:250px; overflow-y: scroll;overflow-x: scroll"),
                             box(title = "Sample Derivatization Correction",
                                 width = 12,
-                                DTOutput("sample_derivatization_table"),
-                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                                DTOutput("sample_derivatization_table"))
                         ))
             )
         )
@@ -1015,8 +1074,7 @@ server <- function(input, output, session) {
             updateNumericInput(session,"smallest_acceptable_peak",value = ingest()$initials$smallest_acceptable_peak[1])
             updateRadioButtons(session,"normalization_option",selected = ingest()$initials$normalization_option[1])
             updateCheckboxGroupInput(session,"normalization_comps",choices = cal_comp_list()$comp_class, selected = default_cal_comp())
-            updateNumericInput(session,"derivative_dD",value = ingest()$derivatization_table$derivative_dD[1])
-            updateNumericInput(session,"derivative_dD_uncertainty",value = ingest()$derivatization_table$derivative_dD_uncertainty[1])
+            updateRadioButtons(session,"derivatization_option",selected = ingest()$initials$derivatization_option[1])
             },priority = 1)
         observe({updateSelectInput(session,"compound_option",selected = ingest()$initials$compound_option[1])})
         
@@ -1201,12 +1259,12 @@ server <- function(input, output, session) {
         
         derivatization_results <- reactive({
             derivatization_correction(third_correction_data()$output,
-                                   ingest()$derivatization_table[,1:4],
-                                   input$derivative_dD,
-                                   input$derivative_dD_uncertainty)
+                                      ingest()$derivatization_table,
+                                      input$derivatization_option)
         })
         
         output$derivatization_table <- renderDT(ingest()$derivatization_table[,1:4],options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
+        output$derivative_dD_selected <- renderDT(derivatization_results()$derivative_dD_selected,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         output$sample_derivatization_table <- renderDT(derivatization_results()$output,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         
     }
