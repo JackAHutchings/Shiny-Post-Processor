@@ -962,7 +962,8 @@ server <- function(input, output, session) {
                       already identified in your IRMS export, then this is not needed.",
                             style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
                     tags$li(strong("Derivatization:")," (Optional) A list of compound names & classes and their hydrogen atom counts. If you are running non-derivatized compounds (e.g., n-alkanes), then
-                      this table is not necessary. The known value of your derivative \u03B4D",
+                      this table is not necessary. The known value of your derivative \u03B4D should be entered here with appropriate error. This may be left empty if you include a derivatization
+                            standard with the sequence.",
                             style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
                     tags$li(strong("Initials:")," (Optional) The initial choices for each processing option. If you have a preferred method, then you may want to
                       change these to match your preference. To work, these must be exactly the same as the options visible throughout the app.",
