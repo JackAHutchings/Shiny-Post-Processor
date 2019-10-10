@@ -35,85 +35,89 @@ library(shiny) # shiny
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
-        raw_irms_data <- read.csv(raw_isodat_file) # Read in the 'raw' IRMS export
-        sample_info <- read_xlsx(gcirms_template_file,sheet="Samples",range=cell_cols("A:G")) %>%  # Read in the 'Samples' sheet
-            rename(id1 = `Identifier 1`) # Change to the variable used throughout this script...
-        standard_info <- read_xlsx(gcirms_template_file,sheet="Standards",range=cell_cols("A:G")) %>% rename(std_mix = `Identifier 1`) # Read in the 'Standards' sheet
-        headers <- read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("B"))$export_header %>% # Vector of the headers in the raw_irms_data
-            setNames(read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("A"))$ingest_header) # Values to rename the original headers
-        derivatization_table <- read_xlsx(gcirms_template_file,sheet="Derivatization",range=cell_cols("A:F")) # Read in the 'Derivatization' Sheet
-        initials <- read_xlsx(gcirms_template_file,sheet="Initials",range=cell_cols(c("A:B"))) %>% # Read in the 'Initials' sheet
-            group_by(variable) %>% mutate(observation = 1:n()) %>% spread(variable,initial_value) # Reformat so that each initial is a variable.
-        rt_table <- read_xlsx(gcirms_template_file,sheet="Retention Times",range=cell_cols("A:C")) %>% 
-            rename(rt_table = rt,comp_rt_table = comp)
+    
+    # Read in the 'raw' IRMS export}
+    if(grepl("csv",raw_isodat_file)){raw_irms_data <- read.csv(raw_isodat_file)} else 
+    if(grepl("xlsx",raw_isodat_file)){raw_irms_data <- read_excel(raw_isodat_file)}
+    
+    sample_info <- read_xlsx(gcirms_template_file,sheet="Samples",range=cell_cols("A:G")) %>%  # Read in the 'Samples' sheet
+        rename(id1 = `Identifier 1`) # Change to the variable used throughout this script...
+    standard_info <- read_xlsx(gcirms_template_file,sheet="Standards",range=cell_cols("A:G")) %>% rename(std_mix = `Identifier 1`) # Read in the 'Standards' sheet
+    headers <- read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("B"))$export_header %>% # Vector of the headers in the raw_irms_data
+        setNames(read_xlsx(gcirms_template_file,sheet="Headers",range=cell_cols("A"))$ingest_header) # Values to rename the original headers
+    derivatization_table <- read_xlsx(gcirms_template_file,sheet="Derivatization",range=cell_cols("A:F")) # Read in the 'Derivatization' Sheet
+    initials <- read_xlsx(gcirms_template_file,sheet="Initials",range=cell_cols(c("A:B"))) %>% # Read in the 'Initials' sheet
+        group_by(variable) %>% mutate(observation = 1:n()) %>% spread(variable,initial_value) # Reformat so that each initial is a variable.
+    rt_table <- read_xlsx(gcirms_template_file,sheet="Retention Times",range=cell_cols("A:C")) %>% 
+        rename(rt_table = rt,comp_rt_table = comp_class)
+    
+    header_mismatch <- names(headers[which(!(headers %in% colnames(raw_irms_data)))]) # A list of initially missing headers.
+    optional_headers <- c("raw_R","conc","peak","rt") # A list of optional headers.
+    missing_headers <- header_mismatch[which(!(header_mismatch %in% optional_headers))] # A list of non-optional missing headers.
+    headers_to_use <- headers[which(!(names(headers) %in% header_mismatch))] # Original header list sans *any* missing headers.
+    
+    # If there are no non-optional missing headers, then go ahead with initial data processing:
+    if(length(missing_headers) == 0){
+        #Data Ingestion. Yum!
+        {
+        rawdata <- raw_irms_data %>% # Reads in the file.
+            filter(!is.na(Row)) %>% # Remove any blank rows (sometimes caused by export weirdness).
+            rename(!!!headers_to_use) %>%  # Rename the headers we will use based on the 'Headers' sheet in the GCIRMS template.
+            mutate(row = row - min(row) + 1) %>%  # Generates a row index starting with first exported injection. This is helpful as the first few rows are usually unused warmups.
+            rowwise() %>% 
+            mutate(rt = ifelse("rt" %in% names(.),rt,NA)) %>% # Check if retention time was provided. If not, enter NA. RT is only used to assign compound names.
+            mutate(comp = ifelse("comp" %in% names(.),as.character(comp),NA)) %>% # Check if compound names are provided. If not, enter NA as a placeholder.
+            mutate(peak = ifelse("peak" %in% names(.),peak,1:n())) %>% # Check if the peak column is present. If it isn't, generate an index so the code still functions.
+            mutate(conc = ifelse("conc" %in% names(.),conc,1)) %>% # Check if concentrations were provided. If not, use '1' as the placeholder. In principle, the
+            # end-user could provide unique Identifier 1 entries for each concentration of a standard and have those match the IRMS data. This should be done if
+            # the end-user has size effect standards with varying compound concentration ratios (i.e., if each level were manually mixed rather than serially diluted)
+            mutate(raw_R = ifelse("raw_R" %in% names(.),raw_R,0)) %>% #Check if the raw element ratio was provided. If not, enter zero. The raw ratio is only used as
+            # a diagnostic plot.
+            as.data.frame() %>% # This 'turns off' the rowwise mode.
+            group_by(row,id1,id2,comp) %>% 
+            filter(peak == max(peak)) %>% # Manually added peaks are added to the end of the peak list, but with the same 'comp' value. This filters
+            # so that only the last peak of a comp is used. This behavior is only known to be true for Isodat 3.0! Older/other software may have distinct behavior.
+            # The safest way to ensure compatibility is to just have a single observation for each compound in each injection.
+            filter(comp != "" & comp != "-") %>% # Remove non-identified peaks.
+            select(row,id1,id2,conc,comp,rt,area,ampl,raw_R,dD_raw) %>% # Select only the headers we will use.
+            arrange(row) %>% ungroup()
         
-        header_mismatch <- names(headers[which(!(headers %in% colnames(raw_irms_data)))]) # A list of initially missing headers.
-        optional_headers <- c("raw_R","conc","peak","rt") # A list of optional headers.
-        missing_headers <- header_mismatch[which(!(header_mismatch %in% optional_headers))] # A list of non-optional missing headers.
-        headers_to_use <- headers[which(!(names(headers) %in% header_mismatch))] # Original header list sans *any* missing headers.
+        injections <- rawdata %>% 
+            select(row,id1) %>% #row is our unique injection identifier, but we do multiple injections per vial!
+            distinct() %>% # Removes all the extra rows for the exported compound information.
+            arrange(row) %>% # Sort the data frame by row.
+            group_by(id1) %>% # For each unique id1 we'll do the following... (warning: janky solution)
+            mutate(row_diff = c(0,diff(row)), # What's the difference in row for each injection of a vial? Practically, all non-first injections in each series is equal to 1.
+                   row_base = ifelse(row_diff == 1,NA,row), # If an injection isn't the first in a replicate injection series, mark it NA.
+                   row_base = na.locf(row_base)) %>% # locf = last observation carried forward, this marks each subsequent injection in a series with its starting row.
+            select(-c(row_diff))
         
-        # If there are no non-optional missing headers, then go ahead with initial data processing:
-        if(length(missing_headers) == 0){
-            #Data Ingestion. Yum!
-            {
-            rawdata <- raw_irms_data %>% # Reads in the file.
-                filter(!is.na(Row)) %>% # Remove any blank rows (sometimes caused by export weirdness).
-                rename(!!!headers_to_use) %>%  # Rename the headers we will use based on the 'Headers' sheet in the GCIRMS template.
-                mutate(row = row - min(row) + 1) %>%  # Generates a row index starting with first exported injection. This is helpful as the first few rows are usually unused warmups.
-                rowwise() %>% 
-                mutate(rt = ifelse("rt" %in% names(.),rt,NA)) %>% # Check if retention time was provided. If not, enter NA. RT is only used to assign compound names.
-                mutate(comp = ifelse("comp" %in% names(.),as.character(comp),NA)) %>% # Check if compound names are provided. If not, enter NA as a placeholder.
-                mutate(peak = ifelse("peak" %in% names(.),peak,1:n())) %>% # Check if the peak column is present. If it isn't, generate an index so the code still functions.
-                mutate(conc = ifelse("conc" %in% names(.),conc,1)) %>% # Check if concentrations were provided. If not, use '1' as the placeholder. In principle, the
-                # end-user could provide unique Identifier 1 entries for each concentration of a standard and have those match the IRMS data. This should be done if
-                # the end-user has size effect standards with varying compound concentration ratios (i.e., if each level were manually mixed rather than serially diluted)
-                mutate(raw_R = ifelse("raw_R" %in% names(.),raw_R,0)) %>% #Check if the raw element ratio was provided. If not, enter zero. The raw ratio is only used as
-                # a diagnostic plot.
-                as.data.frame() %>% # This 'turns off' the rowwise mode.
-                group_by(row,id1,id2,comp) %>% 
-                filter(peak == max(peak)) %>% # Manually added peaks are added to the end of the peak list, but with the same 'comp' value. This filters
-                # so that only the last peak of a comp is used. This behavior is only known to be true for Isodat 3.0! Older/other software may have distinct behavior.
-                # The safest way to ensure compatibility is to just have a single observation for each compound in each injection.
-                filter(comp != "" & comp != "-") %>% # Remove non-identified peaks.
-                select(row,id1,id2,conc,comp,rt,area,ampl,raw_R,dD_raw) %>% # Select only the headers we will use.
-                arrange(row) %>% ungroup()
-            
-            injections <- rawdata %>% 
-                select(row,id1) %>% #row is our unique injection identifier, but we do multiple injections per vial!
-                distinct() %>% # Removes all the extra rows for the exported compound information.
-                arrange(row) %>% # Sort the data frame by row.
-                group_by(id1) %>% # For each unique id1 we'll do the following... (warning: janky solution)
-                mutate(row_diff = c(0,diff(row)), # What's the difference in row for each injection of a vial? Practically, all non-first injections in each series is equal to 1.
-                       row_base = ifelse(row_diff == 1,NA,row), # If an injection isn't the first in a replicate injection series, mark it NA.
-                       row_base = na.locf(row_base)) %>% # locf = last observation carried forward, this marks each subsequent injection in a series with its starting row.
-                select(-c(row_diff))
-            
-            compounds <- rawdata %>% mutate(dummy=T) %>% 
-                full_join(rt_table %>% mutate(dummy=T),by="dummy") %>% 
-                group_by(row,rt) %>% 
-                mutate(rt_diff = abs(rt - rt_table)) %>% 
-                group_by(rt_table,window) %>% 
-                filter(rt_diff < window) %>% 
-                group_by(row,comp_rt_table) %>% 
-                mutate(closest_RT = ifelse(rt_diff == min(rt_diff),T,F)) %>% 
-                filter(closest_RT) %>% 
-                select(row,id1,id2,rt,comp_rt_table)
-            
-            output <- full_join(rawdata,injections,by = c("row", "id1")) %>% 
-                rename(comp_irms_output = comp) %>% 
-                full_join(compounds,by=c("row","id1","id2","rt"))
-            }
+        compounds <- rawdata %>% mutate(dummy=T) %>% 
+            full_join(rt_table %>% mutate(dummy=T),by="dummy") %>% 
+            group_by(row,rt) %>% 
+            mutate(rt_diff = abs(rt - rt_table)) %>% 
+            group_by(rt_table,window) %>% 
+            filter(rt_diff < window) %>% 
+            group_by(row,comp_rt_table) %>% 
+            mutate(closest_RT = ifelse(rt_diff == min(rt_diff),T,F)) %>% 
+            filter(closest_RT) %>% 
+            select(row,id1,id2,rt,comp_rt_table)
         
-            list("raw_irms_check" = T,
-                 "raw_irms_data" = raw_irms_data,
-                 "sample_info" = sample_info,
-                 "standard_info" = standard_info,
-                 "derivatization_table" = derivatization_table,
-                 "initials" = initials,
-                 "rt_table" = rt_table,
-                 "output" = output)
-        } else # Otherwise, check for missing headers and list them as the only output.
-        if(length(missing_headers) > 0){list("raw_irms_check" = missing_headers)}
+        output <- full_join(rawdata,injections,by = c("row", "id1")) %>% 
+            rename(comp_irms_output = comp) %>% 
+            full_join(compounds,by=c("row","id1","id2","rt"))
+        }
+    
+        list("raw_irms_check" = T,
+             "raw_irms_data" = raw_irms_data,
+             "sample_info" = sample_info,
+             "standard_info" = standard_info,
+             "derivatization_table" = derivatization_table,
+             "initials" = initials,
+             "rt_table" = rt_table,
+             "output" = output)
+    } else # Otherwise, check for missing headers and list them as the only output.
+    if(length(missing_headers) > 0){list("raw_irms_check" = missing_headers)}
 }
 
 comp_assign_function <- function(input,standard_info,compound_option) {
@@ -625,6 +629,7 @@ final_sample_function <- function(input,qaqc_error) {
 # UI
 {
     ui <- dashboardPage(
+        skin = "green",
         dashboardHeader(title = "GC-IRMS \u03B4D"),
         dashboardSidebar(
             sidebarMenu(
@@ -639,20 +644,23 @@ final_sample_function <- function(input,qaqc_error) {
             )
         ),
         dashboardBody(
+            tags$style("* {font-family: Arial;}"),
+            tags$h1(tags$style("h1 {font-family: Arial;}")),
+            tags$h3(tags$style("h3 {font-family: Arial;}")),
             tabItems(
                 tabItem(tabName = "ingest",
                         fluidPage(
-                            box(title = h1("Shiny Post-Processor: Compound Specific \u03B4D via GC-HTC-IRMS", strong("(expand for instructions!)")),
+                            box(title = h1("Shiny Post-Processor: Compound Specific \u03B4D via GC-HTC-IRMS", strong("(expand for instructions!)"),hr()),
                                 solidHeader=T,
                                 width=12,
                                 collapsible = T,
-                                collapsed = F,
+                                collapsed = T,
                                 uiOutput("introduction")),
                             box(title = "Select IRMS export file:",
                                 width=9,
                                 fileInput("raw_irms_file",
-                                          label = "Must be a CSV and headers need to be identified in the GCIRMS template if not an Isodat 3.0 CSV export.",
-                                          accept = c(".csv"))),
+                                          label = "May be a CSV, XLS, or XLSX, but headers must be identified in the GCIRMS template if not an Isodat 3.0 CSV export.",
+                                          accept = c(".csv",".xlsx",".xls"))),
                             column(3,
                                 infoBoxOutput("raw_irms_status",width=12),
                                 infoBoxOutput("raw_irms_check",width=12)),
@@ -899,45 +907,74 @@ server <- function(input, output, session) {
                 p("Source code, template, and example data can be found ",a("on Github.",href="https://github.com/JackAHutchings/Shiny-Post-Processor")," For development questions/bug
                   reports contact the author, Jack Hutchings, via Github."),
                 h3("Sequence Construction"),
-                p("When setting up your sample sequence, you *must* reserve two columns for 'Identifier 1' and 'Identifier 2'. A third, optional column, is 'Preparation'."
-                  ,style = "padding-left:2em"),
+                p("When setting up your sample sequence, you *must* reserve two columns for 'Identifier 1' and 'Identifier 2'. A third, optional column, is 'Preparation'.",
+                  style = "padding-left:2em"),
                 p(strong("Identifier 1:")," This is the primary identifier of the vial you are injecting. If the vial is a standard, then there should be matching entries in your
                   template file (Standards sheet; see below) to fill in known values. If the vial is a sample, then this can be whatever value you desire. However, if you are
-                  using the optional Samples sheet in the template file, then you'll want these to match so you have proper metadata.",style = "padding-left:2em"),
+                  using the optional Samples sheet in the template file, then you'll want these to match so you have proper metadata.",
+                  style = "padding-left:2em"),
                 p(strong("Identifier 2:")," This is reserved (i.e., should only contain values as stated here) and must be used to describe the role of the injection. The 
-                  following roles are understood:",style = "padding-left:2em"),
+                  following roles are understood:",
+                  style = "padding-left:2em"),
                 tags$ul(
-                    tags$li("sample (unknown)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
-                    tags$li("standard (scale normalization standard)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
-                    tags$li("control (known standard to estimate accuracy)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
-                    tags$li("drift (account for instrument drift)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
-                    tags$li("size (peak size to isotope ratio correction)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
-                    tags$li("derivatization (calculate added hydrogen during derivatization)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;"),
-                    tags$li("warm-up (discarded injections)",style = "list-style-type: disc;list-style-position: inside;text-indent: -1em;padding-left: 2em;")
+                    tags$li("sample (unknown)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("standard (scale normalization standard)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("control (known standard to estimate accuracy)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("drift (account for instrument drift)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("size (peak size to isotope ratio correction)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("derivatization (calculate added hydrogen during derivatization)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("warm-up (discarded injections)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;")
                     ),
                 p("Standards may serve multiple roles (i.e, drift and control) that should be separated by an underscore (i.e., drift_control) in Identifier 2.
                   If a standard is assigned both the standard and control role (i.e., standard_control), then the compounds selected for scale normalization will be
                   excluded from use as control standards. Only sample and standard roles are required to be used. If you have pre-determined your derivative hydrogen, 
-                  the known value can be entered in the Excel template file (see below)",style = "padding-left:2em"),
+                  the known value can be entered in the Excel template file (see below)",
+                  style = "padding-left:2em"),
                 p(strong("Preparation:")," (optional) This column is used to indicate the concentration ( ng/\u03BCL ) of a vial. This is only necessary if size correction is desired 
-                  or if multiple concentrations of one of the other standards are used. Sample concentration is not interpreted.",style = "padding-left:2em"),
+                  or if multiple concentrations of one of the other standards are used. Sample concentration is not interpreted.",
+                  style = "padding-left:2em"),
                 h3("GCIRMS Template Completion"),
                 p("The Microsoft Excel template file can be found at",a("this app's Github repository.",href="https://github.com/JackAHutchings/Shiny-Post-Processor/tree/master/GCIRMS_Processor"),
-                  " The file contains instructions (spreadsheet cells with bright yelow backgrounds), but general usage of each 'Sheet' within the file is described at follows:",
+                  " The file contains instructions (spreadsheet cells with bright yelow backgrounds), but general usage of each 'Sheet' within the file is described below. Each sheet is labeled
+                  as (Optional) or (Required) if it is necessary for the user to change values in the sheet for functioning. However, even if a sheet is optional,",
+                  strong("do not delete or rename any sheets!")," You may add sheets as desired, but all the sheets and their names in the original template must be present for the app 
+                  to function.",
                   style = "padding-left:2em"),
-                p(strong("Sequence Table:")," The sequence table is optional and designed specifically for copy/pasting into an Isodat 3.0 GC Isolink II Sequence file. If you are running 
-                  an older version or some other software, this template will not be particularly useful. However, the app does not use this sheet, so you may delete it or replace it with 
-                  a template of your own.",style = "padding-left:2em"),
-                p(strong("Samples:")," The samples sheet is also optional. If used, the 'Identifier 1' column should match 'Identifier 1' in your sequence table and IRMS output. The remaining
-                  columns (B through G) can have their headers changed and contents filled with whatever sample metadata you require.",style = "padding-left:2em"),
-                p(strong("Standards:"), " This sheet is required. Standards with known compositions (scale normalization and controls) must have their known values entered here. You may enter
-                  as many standards as you desire; only those with matching Identifier 1 values will be used by the script. If a standard contains compounds at different concentrations,
-                  then their concentation relative to 'Preparation' in your Sequence Table/IRMS Export should be entered here. If you don't have or want to use a 'Preparation' column, the actual
-                  concentrations could be entered here. To have a standard at multiple concentrations (e.g., your peak size effect standard), you would need each concentration level to have its
-                  own Identifier 1 and concentration information entered in relative_concentration.",style = "padding-left:2em"),
-                p(strong("Headers:")," This sheet informs the app what the actual header values are in your IRMS export file. Some of these are optional, but for full functionality it is
-                  recommended to include as many as you have available. If you are exporting using Isodat 3.0 as a CSV, then you only need to select the correct headers in your export template,
-                  as the values here match those. If you are using older/other software, you will likely need to identify each column and provide the correct header in your IRMS export file.",
+                tags$ul(
+                    tags$li(strong("Sequence Table:")," (Optional) The sequence table is designed specifically for copy/pasting into an Isodat 3.0 GC Isolink II Sequence file. If you are running 
+                      an older version or some other software, this template will not be particularly useful. However, the app does not use this sheet, so you may delete it or replace it with 
+                      a template of your own.",
+                            style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
+                    tags$li(strong("Samples:")," (Optional) If used, the 'Identifier 1' column should match 'Identifier 1' in your sequence table and IRMS output. The remaining
+                      columns (B through G) can have their headers changed and contents filled with whatever sample metadata you require.",
+                            style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
+                    tags$li(strong("Standards:"), " (Required) Standards with known compositions (scale normalization and controls) must have their known values entered here. You may enter
+                      as many standards as you desire; only those with matching Identifier 1 values will be used by the script. If a standard contains compounds at different concentrations,
+                      then their concentation relative to 'Preparation' in your Sequence Table/IRMS Export should be entered here. If you don't have or want to use a 'Preparation' column, the actual
+                      concentrations could be entered here. To have a standard at multiple concentrations (e.g., your peak size effect standard), you would need each concentration level to have its
+                      own Identifier 1 and concentration information entered in relative_concentration.",
+                            style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
+                    tags$li(strong("Headers:")," (Required) This sheet informs the app what the actual header values are in your IRMS export file. Some of these are optional, but for full functionality it is
+                      recommended to include as many as you have available. If you are exporting using Isodat 3.0 as a CSV, then you only need to select the correct headers in your export template,
+                      as the values here match those. If you are using older/other software, you will likely need to identify each column and provide the correct header in your IRMS export file.",
+                            style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
+                    tags$li(strong("Retention Times:")," (Optional) A list of compound names & classes and their GC retention times. If you use your software's built-in RT table and your compounds are
+                      already identified in your IRMS export, then this is not needed.",
+                            style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
+                    tags$li(strong("Derivatization:")," (Optional) A list of compound names & classes and their hydrogen atom counts. If you are running non-derivatized compounds (e.g., n-alkanes), then
+                      this table is not necessary. The known value of your derivative \u03B4D",
+                            style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
+                    tags$li(strong("Initials:")," (Optional) The initial choices for each processing option. If you have a preferred method, then you may want to
+                      change these to match your preference. To work, these must be exactly the same as the options visible throughout the app.",
+                            style = "list-style-position: inside;text-indent: -40px;padding-left: 40px;")
+                    ),
+                h3("IRMS Export Formatting"),
+                p("Your IRMS export should be either a CSV, XLS, or XLSX file. The required columns in the export are identified in the Headers sheet of the Excel template. You must have
+                  these headers present ",strong("and")," they must match the values in the 'export_header' column of the Headers sheet.",
+                  style = "padding-left:2em"),
+                h3("Usage & Export"),
+                p("Once you have successfully imported your IRMS data and an appropriately completed template, simply progress through the app using the sidebar and make the desired choices.
+                  Export options are still in progress!",
                   style = "padding-left:2em")
             )
         })
@@ -946,7 +983,8 @@ server <- function(input, output, session) {
             
             if( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {return(NULL)}
             if (!(is.null(input$raw_irms_file) & is.null(input$gcirms_template)) & 
-                grepl("csv",input$raw_irms_file$datapath) & grepl("xlsx",input$gcirms_template$datapath)){ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)
+                (grepl("csv",input$raw_irms_file$datapath) | grepl("xls",input$raw_irms_file$datapath)) & 
+                grepl("xlsx",input$gcirms_template$datapath)){ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)
             }
         })
         
@@ -983,8 +1021,8 @@ server <- function(input, output, session) {
         
         output$raw_irms_status <- renderInfoBox({
             if (is.null(input$raw_irms_file)) {text = "No File Uploaded!"; use_color = "blue"}
-            else if( !grepl("csv",input$raw_irms_file$datapath) ) {text = "Raw IRMS file must be CSV!"; use_color = "red"}
-            else if (!is.null(input$raw_irms_file) & grepl("csv",input$raw_irms_file$datapath)) {text = "File Uploaded."; use_color = "green"}
+            else if( !(grepl("csv",input$raw_irms_file$datapath)|grepl("xls",input$raw_irms_file$datapath) )) {text = "Raw IRMS file must be CSV, XLS, or XLSX!"; use_color = "red"}
+            else if( !is.null(input$raw_irms_file) & (grepl("csv",input$raw_irms_file$datapath)|grepl("xls",input$raw_irms_file$datapath))) {text = "File Uploaded."; use_color = "green"}
             
             infoBox("Status:",text,icon = icon("file-alt"),color = use_color)
         })
