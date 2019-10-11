@@ -205,7 +205,7 @@ drift_function <- function(input,drift_option,drift_comp) {
             facet_wrap(~comp_class,scales="free_y") +
             labs(title = "Uncorrected Drift Standards",
                  x = "Injection # in Sequence",
-                 y = "Raw dD (\u2030)")
+                 y = "Raw \u03B4D (\u2030)")
         drift_comp <- ifelse(drift_comp == "Mean drift of all compounds",NA,drift_comp)
         drift_type <- ifelse(drift_option == "Linear interpolation between adjacent drift samples (use this when drift appears non-linear)",1,
                       ifelse(drift_option == "Linear regression across all drift samples (use this when drift appears linear)",2,
@@ -264,7 +264,7 @@ drift_function <- function(input,drift_option,drift_comp) {
             labs(title = "Drift-Corrected Drift Standards",
                  subtitle = "Blue = Corrected, Black = Uncorrected",
                  x = "Injection # in Sequence",
-                 y = "Uncalibrated dD (\u2030)")
+                 y = "Uncalibrated \u03B4D (\u2030)")
         
         drift_correction_by_row_plot <- ggplot(drift_correction,aes(x=row,y=drift_correction)) +
             geom_hline(aes(yintercept = 0),color="blue") +
@@ -359,13 +359,13 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                 geom_smooth(method="lm",se=F) +
                 labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
                      x=size_label,
-                     y="Drift-Corrected dD ( \u2030 )")
+                     y="Uncorrected \u03B4D ( \u2030 )")
             
             size_raw_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
                 geom_point() +
                 geom_smooth(method="lm",se=F) +
                 labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
-                     y="Drift-Corrected dD ( \u2030 )",
+                     y="Uncorrected \u03B4D ( \u2030 )",
                      x=size_label)
             
             size_corrected_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_processing)) +
@@ -373,14 +373,14 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                 facet_wrap(~comp,scales="free_y",nrow=1) +
                 geom_smooth(method="lm",se=F) +
                 labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave 100% identically.",
-                     y="Drift & Size Corrected dD ( \u2030 )",
+                     y="Size Corrected \u03B4D ( \u2030 )",
                      x=size_label)
             
             size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
                 geom_point(aes(color=comp)) +
                 geom_smooth(method="lm",se=F) +
                 labs(title="Corrected plot of size effect standards.",
-                     y="Drift & Size Corrected dD ( \u2030 )",
+                     y="Size Corrected \u03B4D ( \u2030 )",
                      x=size_label)
             
             size_effect_table <- data.frame(size_group = c("Too Small","Small","Normal","Large")) %>% mutate(size_group = as.character(size_group)) %>% 
@@ -530,8 +530,8 @@ normalization_function <- function(input,normalization_option,normalization_comp
             geom_point() +
             geom_smooth(method="lm",se=F) +
             facet_rep_wrap(~label) +
-            labs(x="Observed dD ( \u2030 )",
-                 y="Known dD ( \u2030 )",
+            labs(x="Observed \u04B4D ( \u2030 )",
+                 y="Known \u04B4D ( \u2030 )",
                  title="VSMOW-SLAP Scale Normalization Curve")
         
         output <- input %>% filter(comp != "Ref") %>% 
@@ -601,8 +601,8 @@ control_function <- function(input,normalization_comps,processing_order) {
             geom_smooth(method="lm",se=F,color="black",size=0.25) +
             geom_point(aes(color=std_conc),size=2.5) +
             facet_rep_wrap(~dD_type) + 
-            labs(x = "dD Observed ( \u2030 )",
-                 y = "dD Known ( \u2030 )",
+            labs(x = "\u04B4D Observed ( \u2030 )",
+                 y = "\u04B4D Known ( \u2030 )",
                  color = "Standard + Concentration")
         
         list("control_standards" = control_standards,
@@ -619,7 +619,7 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
     if(!is.null(input)){
         derivative_check <- input %>% filter(grepl("derivatization",id2))
         
-        derivatization_option = ifelse(derivatization_option == "Template-defined derivative \u03B4D.","template",
+        derivatization_choice = ifelse(derivatization_option == "Template-defined derivative \u03B4D.","template",
                                 ifelse(derivatization_option == "Derivatization standard in sequence \u03B4D.","inrun",
                                 ifelse(derivatization_option == "Do not correct for derivative hydrogen.","disabled",
                                        "derivatization_option in derivatization_correction broken! Check that the radioButton choices still match!")))
@@ -657,7 +657,8 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
             select(-c(derivative_dD_error,derivative_dD_uncertainty_error)) %>% 
             rbind(inrun) %>% 
             rbind(data.frame(derivative_dD = NA, derivative_dD_uncertainty = NA, derivatization_filter = "disabled",errors = "")) %>% 
-            filter(derivatization_filter %in% derivatization_option)
+            filter(derivatization_filter %in% derivatization_choice) %>% 
+            mutate(derivatization_filter = derivatization_option)
         
         sample_results <- left_join(input,derivatization_table[,1:4],by = c("comp", "class")) %>% 
             group_by(row,comp,class) %>% 
@@ -666,8 +667,9 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
             mutate(bound_hydrogen_count = ifelse(is.na(bound_hydrogen_count),1,bound_hydrogen_count),
                    derivative_hydrogen_count = ifelse(is.na(derivative_hydrogen_count),0,derivative_hydrogen_count),
                    total_hydrogen_count = bound_hydrogen_count + derivative_hydrogen_count,
+                   derivative_dD_uncertainty = ifelse(derivative_hydrogen_count == 0,0,derivative_dD_uncertainty),
                    final_dD = (total_hydrogen_count*dD_processing - derivative_hydrogen_count*derivative_dD)/bound_hydrogen_count,
-                   final_dD = ifelse(derivatization_option == "disabled",dD_processing,final_dD),
+                   final_dD = ifelse(derivatization_choice == "disabled",dD_processing,final_dD),
                    final_dD = ifelse(id2 == "sample",final_dD,dD_processing))
         
         list("output" = sample_results,
@@ -678,7 +680,8 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
     }
 }
 
-final_sample_function <- function(input,qaqc_error) {
+final_sample_function <- function(input,control_error,control_option,control_standards) {
+    
     
 }
 
@@ -689,14 +692,15 @@ final_sample_function <- function(input,qaqc_error) {
         dashboardHeader(title = "GC-IRMS \u03B4D"),
         dashboardSidebar(
             sidebarMenu(
-                menuItem("Ingest Data",tabName = "ingest",icon = icon("table")),
-                menuItem("Peaks & Diagnostics",tabName = "diagplots",icon = icon("chart-line")),
-                menuItem("Processing Order",tabName = "proc_order_selection",icon = icon("list-ol")),
+                menuItem("Ingest Data",tabName = "ingest_tab",icon = icon("table")),
+                menuItem("Peaks & Diagnostics",tabName = "peak_tab",icon = icon("chart-line")),
+                menuItem("Processing Order",tabName = "order_tab",icon = icon("list-ol")),
                 menuItem("Drift Correction",tabName = "drift_tab",icon = icon("shoe-prints")),
                 menuItem("Size Correction",tabName = "size_tab",icon = icon("signal")),
                 menuItem("Scale Normalization",tabName = "normalization_tab", icon = icon("balance-scale")),
-                menuItem("Control Standards",tabName = "corrections_tab", icon = icon("bullseye")),
-                menuItem("Derivatization",tabName = "derivatization_tab", icon = icon("vials"))
+                menuItem("Control Standards",tabName = "control_tab", icon = icon("bullseye")),
+                menuItem("Derivatization",tabName = "derivatization_tab", icon = icon("vials")),
+                menuItem("Sample Error",tabName = "error_tab", icon = icon("square-root-alt"))
             )
         ),
         dashboardBody(
@@ -704,7 +708,7 @@ final_sample_function <- function(input,qaqc_error) {
             tags$h1(tags$style("h1 {font-family: Arial;}")),
             tags$h3(tags$style("h3 {font-family: Arial;}")),
             tabItems(
-                tabItem(tabName = "ingest",
+                tabItem(tabName = "ingest_tab",
                         fluidPage(
                             box(title = h1("Shiny Post-Processor: Compound Specific \u03B4D via GC-HTC-IRMS", strong("(expand for instructions!)"),hr()),
                                 solidHeader=T,
@@ -750,8 +754,9 @@ final_sample_function <- function(input,qaqc_error) {
                                 collapsed = T,
                                 DTOutput("ingestdata"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll")
-                )),
-                tabItem(tabName = "diagplots",
+                        )
+                ),
+                tabItem(tabName = "peak_tab",
                         fluidPage(
                             box(title = NULL,
                                 width=6,
@@ -780,8 +785,9 @@ final_sample_function <- function(input,qaqc_error) {
                             box(title = "Peak Area to Injection Concentration",
                                 width=4,
                                 plotOutput("plot_ampl_curve"))
-                )),
-                tabItem(tabName = "proc_order_selection",
+                        )
+                ),
+                tabItem(tabName = "order_tab",
                         fluidPage(
                             box(title = "Select the order to perform corrections. Each correction can also be disabled by an option in its tab.",
                                 width=12),
@@ -800,7 +806,8 @@ final_sample_function <- function(input,qaqc_error) {
                                 selectInput("third_correction",
                                             label = "Third Correction",
                                             choices = c("Drift","Size","Scale Normalization")))
-                        )),
+                        )
+                ),
                 tabItem(tabName = "drift_tab",
                         fluidPage(
                             fluidRow(
@@ -830,7 +837,8 @@ final_sample_function <- function(input,qaqc_error) {
                                 width=12,
                                 DTOutput("drift_corrected_data"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll")
-                        )),
+                        )
+                ),
                 tabItem(tabName = "size_tab",
                         fluidPage(
                             fluidRow(
@@ -898,7 +906,8 @@ final_sample_function <- function(input,qaqc_error) {
                                 width=12,
                                 DTOutput("size_corrected_data"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll")
-                        )),
+                        )
+                 ),
                  tabItem(tabName = "normalization_tab",
                         fluidPage(
                             fluidRow(
@@ -919,15 +928,17 @@ final_sample_function <- function(input,qaqc_error) {
                                 width=12,
                                 DTOutput("scale_normalization_corrected_data"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll")
-                        )),
-                tabItem(tabName = "corrections_tab",
+                        )
+                ),
+                tabItem(tabName = "control_tab",
                         fluidPage(
                             box(title = NULL,
                                 width = 12,
                                 DTOutput("control_standards")),
                             fluidRow(title = NULL,
                                      column(width=6,offset=3,align="center",plotOutput("corrections_plot",height = 600)))
-                        )),
+                        )
+                ),
                 tabItem(tabName = "derivatization_tab",
                         fluidPage(
                             box(title = NULL,
@@ -945,14 +956,35 @@ final_sample_function <- function(input,qaqc_error) {
                                 style="height:250px; overflow-y: scroll;overflow-x: scroll"),
                             box(title = "Selected Derivative \u03B4D Values",
                                 width = 12,
-                                collapsible = T,
-                                collapsed = F,
-                                tableOutput("derivative_dD_selected"),
+                                tableOutput("derivative_dD_selected")),
                             box(title = "Sample Derivatization Correction",
                                 width = 12,
                                 DTOutput("sample_derivatization_table"),
-                                style="height:500px; overflow-y: scroll;overflow-x: scroll"))
-                        ))
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                        )
+                ),
+                tabItem(tabName = "error_tab",
+                        fluidPage(
+                            box(title = NULL,
+                                width = 6,
+                                radioButtons("accuracy_source",
+                                             label = "Choose which pool of control standards to use for accuracy propagation:",
+                                             choices = c("Sequence control standards only.",
+                                                         "Long-term control standards only.",
+                                                         "Sequence & long-term control standards."))),
+                            box(title = NULL,
+                                width = 6,
+                                checkboxGroupInput("accuracy_standards",
+                                                   label = "Choose which standards to calculate RMS error from:")),
+                            box(title = "Chosen Error Values & Warnings",
+                                width = 12,
+                                tableOutput("chosen_error_table")),
+                            box(title = "Final Sample Errors",
+                                width = 12,
+                                DTOutput("sample_derivatization_table"),
+                                style="height:500px; overflow-y: scroll;overflow-x: scroll")
+                        )
+                )
             )
         )
     )
