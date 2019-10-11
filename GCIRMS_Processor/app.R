@@ -14,26 +14,26 @@ library(DT) # tabular data is rendered via DT
 library(shiny) # shiny
 
 #testing
-{
-    raw_isodat_file = "(H2 Export).csv"
-    gcirms_template_file = "GCIRMS Template - Phthalic Acid.xlsx"
-    compound_option = "Assigned by IRMS export in Component/comp column."
-    drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-    drift_comp = "Mean drift of all compounds"
-    size_option = "Peak Height (amplitude, mV)"
-    size_cutoff = 3300
-    size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
-    size_small_peak_action = "Remove size effect with 'Small' size effect function."
-    size_toosmall_peak_action = "Remove these from results."
-    size_large_peak_action = "No size effect correction."
-    acceptable_peak_units = "Peak Height (amplitude, mV)"
-    largest_acceptable_peak = NA
-    smallest_acceptable_peak = NA
-    normalization_option = "Linear interpolation between adjacent normalization standards"
-    normalization_comps = c("C20 FAME", "C31 Alkane")
-    derivatization_option = "Template-defined derivative \u03B4D."
-
-}
+# {
+#     raw_isodat_file = "(H2 Export).csv"
+#     gcirms_template_file = "GCIRMS Template - Phthalic Acid.xlsx"
+#     compound_option = "Assigned by IRMS export in Component/comp column."
+#     drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+#     drift_comp = "Mean drift of all compounds"
+#     size_option = "Peak Height (amplitude, mV)"
+#     size_cutoff = 3300
+#     size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+#     size_small_peak_action = "Remove size effect with 'Small' size effect function."
+#     size_toosmall_peak_action = "Remove these from results."
+#     size_large_peak_action = "No size effect correction."
+#     acceptable_peak_units = "Peak Height (amplitude, mV)"
+#     largest_acceptable_peak = NA
+#     smallest_acceptable_peak = NA
+#     normalization_option = "Linear interpolation between adjacent normalization standards"
+#     normalization_comps = c("C20 FAME", "C31 Alkane")
+#     derivatization_option = "Template-defined derivative \u03B4D."
+# 
+# }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
     
@@ -981,7 +981,7 @@ final_sample_function <- function(input,control_error,control_option,control_sta
                                 tableOutput("chosen_error_table")),
                             box(title = "Final Sample Errors",
                                 width = 12,
-                                DTOutput("sample_derivatization_table"),
+                                DTOutput("final_sample_error_table"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll")
                         )
                 )
