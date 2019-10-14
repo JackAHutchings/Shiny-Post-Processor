@@ -10,6 +10,7 @@ library(lemon) # needed for facet_rep_wrap/grid functions
 library(writexl) # export the finished data
 library(readxl) # import the template file
 library(shinydashboard) # shiny
+library(httr) # Needed for fetching URLs
 library(DT) # tabular data is rendered via DT
 library(shiny) # shiny
 
@@ -717,19 +718,21 @@ final_sample_function <- function(input,control_error,control_option,control_sta
                                 collapsed = T,
                                 uiOutput("introduction")),
                             box(title = "Select IRMS export file:",
-                                width=9,
+                                width=3,
                                 fileInput("raw_irms_file",
-                                          label = "May be a CSV, XLS, or XLSX, but headers must be identified in the GCIRMS template if not an Isodat 3.0 CSV export.",
+                                          label = "May be a CSV, XLS, or XLSX, but headers must be identified in the template if not an Isodat 3.0 CSV export.",
                                           accept = c(".csv",".xlsx",".xls"))),
+                            box(title = "Select GC-IRMS Template file:",
+                                width=3,
+                                fileInput("gcirms_template",
+                                          label = "This must follow the structure of the original template! Do not delete any sheets!",
+                                          accept = c(".xlsx"))),
+                            column(3,
+                                   box(width=12,height=85,actionButton("load_demos",label="Loads examples from Github.",icon = icon("file"))),
+                                   infoBoxOutput("gcirms_template_status",width=12)),
                             column(3,
                                 infoBoxOutput("raw_irms_status",width=12),
                                 infoBoxOutput("raw_irms_check",width=12)),
-                            box(title = "Select GC-IRMS Template file:",
-                                width=10,
-                                fileInput("gcirms_template",
-                                          label = "This must follow the structure of the original template!",
-                                          accept = c(".xlsx"))),
-                            infoBoxOutput("gcirms_template_status", width = 2),
                             box(title = "Raw IRMS Export",
                                 width=12,
                                 collapsible = T,
@@ -1071,13 +1074,23 @@ server <- function(input, output, session) {
             )
         })
         
+        # demo_paths <- eventReactive(input$load_demos,{
+        #            c("https://raw.githubusercontent.com/JackAHutchings/Shiny-Post-Processor/master/GCIRMS_Processor/Example%20Export.csv",
+        #              "https://github.com/JackAHutchings/Shiny-Post-Processor/blob/master/GCIRMS_Processor/GCIRMS%20Template.xlsx?raw=true")
+        # })
+        
+        
         ingest <- reactive({
             
-            if( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {return(NULL)}
-            if (!(is.null(input$raw_irms_file) & is.null(input$gcirms_template)) & 
-                (grepl("csv",input$raw_irms_file$datapath) | grepl("xls",input$raw_irms_file$datapath)) & 
-                grepl("xlsx",input$gcirms_template$datapath)){ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)
+            # if ( !is.null(demo_paths()) ) {
+            #     GET(demo_paths()[2],write_disk(tf <- tempfile(fileext = ".xlsx")))
+            #     ingest_function(demo_paths()[1],tf)}
+            if ( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {return(NULL)} else{
+            if (!(is.null(input$raw_irms_file) & is.null(input$gcirms_template)) &
+                    (grepl("csv",input$raw_irms_file$datapath) | grepl("xls",input$raw_irms_file$datapath)) &
+                    grepl("xlsx",input$gcirms_template$datapath)){ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)}
             }
+            
         })
         
         cal_comp_list <- reactive({
