@@ -728,11 +728,11 @@ final_sample_function <- function(input,control_error,control_option,control_sta
                                           label = "This must follow the structure of the original template! Do not delete any sheets!",
                                           accept = c(".xlsx"))),
                             column(3,
-                                   box(width=12,height=85,actionButton("load_demos",label="Loads examples from Github.",icon = icon("file"))),
-                                   infoBoxOutput("gcirms_template_status",width=12)),
+                                   box(width=12,height=55,actionButton("load_demos",label="Load demo input files from Github.",icon = icon("file"))),
+                                   infoBoxOutput("raw_irms_check",width=12)),
                             column(3,
                                 infoBoxOutput("raw_irms_status",width=12),
-                                infoBoxOutput("raw_irms_check",width=12)),
+                                infoBoxOutput("gcirms_template_status",width=12)),
                             box(title = "Raw IRMS Export",
                                 width=12,
                                 collapsible = T,
@@ -1074,23 +1074,23 @@ server <- function(input, output, session) {
             )
         })
         
-        # demo_paths <- eventReactive(input$load_demos,{
-        #            c("https://raw.githubusercontent.com/JackAHutchings/Shiny-Post-Processor/master/GCIRMS_Processor/Example%20Export.csv",
-        #              "https://github.com/JackAHutchings/Shiny-Post-Processor/blob/master/GCIRMS_Processor/GCIRMS%20Template.xlsx?raw=true")
-        # })
-        
+        demo_paths <- eventReactive(input$load_demos,{
+                   c("https://raw.githubusercontent.com/JackAHutchings/Shiny-Post-Processor/master/GCIRMS_Processor/Example%20Export.csv",
+                     "https://github.com/JackAHutchings/Shiny-Post-Processor/blob/master/GCIRMS_Processor/GCIRMS%20Template.xlsx?raw=true")
+        })
         
         ingest <- reactive({
             
-            # if ( !is.null(demo_paths()) ) {
-            #     GET(demo_paths()[2],write_disk(tf <- tempfile(fileext = ".xlsx")))
-            #     ingest_function(demo_paths()[1],tf)}
-            if ( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {return(NULL)} else{
-            if (!(is.null(input$raw_irms_file) & is.null(input$gcirms_template)) &
-                    (grepl("csv",input$raw_irms_file$datapath) | grepl("xls",input$raw_irms_file$datapath)) &
-                    grepl("xlsx",input$gcirms_template$datapath)){ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)}
+            if ( input$load_demos !=0 ) {
+                        GET(demo_paths()[2],write_disk(tf <- tempfile(fileext = ".xlsx")))
+                        ingest_function(demo_paths()[1],tf)
+            } else if ( is.null(input$raw_irms_file) | is.null(input$gcirms_template) ) {
+                return(NULL)
+            } else if (!(is.null(input$raw_irms_file) & is.null(input$gcirms_template)) &
+                       (grepl("csv",input$raw_irms_file$datapath) | grepl("xls",input$raw_irms_file$datapath)) &
+                       grepl("xlsx",input$gcirms_template$datapath)) {
+                ingest_function(input$raw_irms_file$datapath,input$gcirms_template$datapath)
             }
-            
         })
         
         cal_comp_list <- reactive({
@@ -1124,21 +1124,23 @@ server <- function(input, output, session) {
         observe({updateSelectInput(session,"compound_option",selected = ingest()$initials$compound_option[1])})
         
         output$raw_irms_status <- renderInfoBox({
-            if (is.null(input$raw_irms_file)) {text = "No File Uploaded!"; use_color = "blue"}
+            if (is.null(input$raw_irms_file)& input$load_demos ==0) {text = "No File Uploaded!"; use_color = "blue"}
+            else if (input$load_demos != 0) {text = "Demo File Loaded!";use_color="green"}
             else if( !(grepl("csv",input$raw_irms_file$datapath)|grepl("xls",input$raw_irms_file$datapath) )) {text = "Raw IRMS file must be CSV, XLS, or XLSX!"; use_color = "red"}
             else if( !is.null(input$raw_irms_file) & (grepl("csv",input$raw_irms_file$datapath)|grepl("xls",input$raw_irms_file$datapath))) {text = "File Uploaded."; use_color = "green"}
             
             infoBox("Status:",text,icon = icon("file-alt"),color = use_color)
         })
         output$gcirms_template_status <- renderInfoBox({
-            if (is.null(input$gcirms_template)) {text = "No File Uploaded!"; use_color = "blue"}
-            else if( !grepl("xlsx",input$gcirms_template$datapath) ) {text = "GCIRMS Template file must be XLSX!"; use_color = "red"}
+            if (is.null(input$gcirms_template) & input$load_demos ==0) {text = "No File Uploaded!"; use_color = "blue"}
+            else if (input$load_demos != 0) {text = "Demo File Loaded!";use_color="green"}
+            else if (!grepl("xlsx",input$gcirms_template$datapath) ) {text = "GCIRMS Template file must be XLSX!"; use_color = "red"}
             else if (!is.null(input$gcirms_template) & grepl("xlsx",input$gcirms_template$datapath)) {text = "File Uploaded."; use_color = "green"}
             infoBox("Status:",text,icon = icon("file-excel"),color = use_color)
         })
         
         output$raw_irms_check <- renderInfoBox({
-            if(is.null(ingest())){use_text = "Waiting for both file uploads..."; use_color = "blue"; use_icon = icon("ellipsis-h")}
+            if(is.null(ingest()) | (input$load_demos!=0 & is.null(ingest()))){use_text = "Waiting for both file uploads..."; use_color = "blue"; use_icon = icon("ellipsis-h")}
             if(isTRUE(ingest()$raw_irms_check)){use_text = "Inital File Check Passed."; use_color = "green"; use_icon = icon("check")}
             if(is.character(ingest()$raw_irms_check)){use_text = paste("Header Mismatch: ",paste(ingest()$raw_irms_check,collapse=", ")); use_color = "red"; use_icon = icon("exclamation-triangle")}
             infoBox("File Check:",value=use_text,icon=use_icon,color=use_color)
