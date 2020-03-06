@@ -13,6 +13,7 @@ library(shinydashboard) # shiny
 library(httr) # Needed for fetching URLs
 library(DT) # tabular data is rendered via DT
 library(shiny) # shiny
+library(plotly)
 
 #testing
 # {
@@ -175,13 +176,13 @@ comp_assign_function <- function(input,standard_info,compound_option) {
     } else {
         plot_area_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=area)) +
             geom_point() +
-            geom_smooth(method="lm",se=F) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
             facet_rep_wrap(~class+comp,nrow=2) +
             labs(x = "Concentration (ng / uL)",
                  y = "Peak Area")
         plot_ampl_curve <- ggplot(area_ampl_curve_data,aes(x=conc,y=ampl)) +
             geom_point() +
-            geom_smooth(method="lm",se=F) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
             facet_rep_wrap(~class+comp,nrow=2) +
             labs(x = "Concentration (ng / uL)",
                  y = "Peak Amplitude")
@@ -202,7 +203,7 @@ drift_function <- function(input,drift_option,drift_comp) {
     if(length(drift_raw$id2) > 0) {
         drift_raw_plot <-   ggplot(drift_raw,aes(x=row,y=dD_processing)) +
             geom_point() +
-            geom_smooth(method="lm",se=F) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
             facet_wrap(~comp_class,scales="free_y") +
             labs(title = "Uncorrected Drift Standards",
                  x = "Injection # in Sequence",
@@ -214,10 +215,11 @@ drift_function <- function(input,drift_option,drift_comp) {
                              "drift_option in drift_function broken! Check that the radioButton choices still match!")))
         
         drift_correction <- drift_raw %>%
-            group_by(comp_class) %>% 
+            mutate(mix_comp_class = paste0(comp_class," (",std_mix,")")) %>% 
+            group_by(mix_comp_class) %>% 
             mutate(i = dense_rank((row_base)),
                    dD_processing = dD_processing - mean(dD_processing)) %>%  # Generate an indexing variable for each set of standard injections... only relevant using drift_type 1
-            filter(ifelse(is.na(drift_comp),T,comp_class==drift_comp)) %>% 
+            filter(ifelse(is.na(drift_comp),T,mix_comp_class==drift_comp)) %>% 
             group_by(row,i,row_base) %>% 
             summarize(dD_mean = mean(dD_processing,na.rm=T)) %>% 
             group_by(i) %>%
@@ -260,7 +262,7 @@ drift_function <- function(input,drift_option,drift_comp) {
             geom_segment(aes(x = row, xend = row, y = dD_predrift, yend = dD_processing)) +
             geom_point(color="blue",size=1.5) +
             geom_point(aes(x=row,y=dD_predrift),size=1.5) +
-            geom_smooth(method="lm",se=F) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
             facet_wrap(~comp,scales="free_y") +
             labs(title = "Drift-Corrected Drift Standards",
                  subtitle = "Blue = Corrected, Black = Uncorrected",
@@ -358,14 +360,14 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
             size_raw_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed)) +
                 geom_point() +
                 facet_wrap(~mix_comp_class,scales="free",nrow=1) +
-                geom_smooth(method="lm",se=F) +
+                geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
                      x=size_label,
                      y="Uncorrected \u03B4D ( \u2030 )")
             
             size_raw_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
                 geom_point() +
-                geom_smooth(method="lm",se=F) +
+                geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
                      y="Uncorrected \u03B4D ( \u2030 )",
                      x=size_label)
@@ -373,14 +375,14 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
             size_corrected_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_processing)) +
                 geom_point() +
                 facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
-                geom_smooth(method="lm",se=F) +
+                geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave 100% identically.",
                      y="Size Corrected \u03B4D ( \u2030 )",
                      x=size_label)
             
             size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
                 geom_point(aes(color=mix_comp_class)) +
-                geom_smooth(method="lm",se=F) +
+                geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Corrected plot of size effect standards.",
                      y="Size Corrected \u03B4D ( \u2030 )",
                      x=size_label)
@@ -494,9 +496,10 @@ normalization_function <- function(input,normalization_option,normalization_comp
             filter(mix_comp_class %in% normalization_comps) %>% ungroup() %>% 
             select(mix_comp_class) %>% distinct() %>% .$mix_comp_class
         
-        scale_normalization_1 <- input %>% filter(comp != "Ref") %>% 
+        scale_normalization_1 <- scale_check %>% filter(comp != "Ref") %>% ungroup() %>% 
             mutate(mix_comp_class = paste0(comp_class," (",id1,")")) %>% 
-            filter(ifelse(length(comps_to_use)==0,grepl("standard",id2),mix_comp_class %in% comps_to_use)) %>% 
+            mutate(comps_boolean = any(mix_comp_class %in% comps_to_use)) %>% 
+            filter(ifelse(comps_boolean,mix_comp_class %in% comps_to_use,comps_boolean)) %>% 
             filter(!is.na(dD_known)) %>% 
             select(row,row_base,std_mix,id2,comp,class,dD_known,dD_processing) %>% 
             ungroup() %>% 
@@ -511,7 +514,9 @@ normalization_function <- function(input,normalization_option,normalization_comp
                    intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1), # Same as above.
                    slope_2 = lm(dD_known~dD_processing)$coefficients[2], # Calculates the slope for normalization_option = 2
                    intercept_2 = lm(dD_known~dD_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_option = 2
-            mutate(i = ifelse(i==max(i),i-1,i))
+            mutate(i = ifelse(i==max(i),i-1,i)) %>% 
+            mutate(slope_1 = ifelse(all(is.na(slope_1)),slope_2,slope_1),
+                   intercept_1 = ifelse(all(is.na(intercept_1)),intercept_2,intercept_1))
         
         # Next, we need to make a data frame to fill in all the rows (injections) that occurred between the drift samples.
         scale_normalization_2 <- scale_normalization_1 %>% 
@@ -526,6 +531,7 @@ normalization_function <- function(input,normalization_option,normalization_comp
             mutate(value = na.locf(value)) %>% # ... which fills each row with the preceding row's coefficient value.
             distinct() %>% 
             spread(coef,value) %>% 
+            mutate(i = ifelse(row == min(row) & is.na(i),i[which(row == min(row[which(!is.na(i))]))],i)) %>% 
             mutate(i = na.locf(i))
         
         normalization_plot <- scale_normalization_1 %>% 
@@ -542,10 +548,10 @@ normalization_function <- function(input,normalization_option,normalization_comp
             filter(!is.na(dD_known)) %>% 
             ggplot(aes(x=dD_processing, y=dD_known)) +
             geom_point() +
-            geom_smooth(method="lm",se=F) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
             facet_rep_wrap(~label) +
-            labs(x="Observed \u04B4D ( \u2030 )",
-                 y="Known \u04B4D ( \u2030 )",
+            labs(x="Observed \u03B4D ( \u2030 )",
+                 y="Known \u03B4D ( \u2030 )",
                  title="VSMOW-SLAP Scale Normalization Curve")
         
         output <- input %>% filter(comp != "Ref") %>% 
@@ -615,11 +621,11 @@ control_function <- function(input,normalization_comps,processing_order) {
         corrections_plot <- ggplot(correction_visual_plot, aes(x=dD_mean,y=dD_known)) +
             geom_errorbar(aes(ymin = dD_known - dD_known_sd, ymax = dD_known + dD_known_sd),width=0) +
             geom_errorbarh(aes(xmin = dD_mean - dD_sd,xmax = dD_mean + dD_sd),height=0) +
-            geom_smooth(method="lm",se=F,color="black",size=0.25) +
+            geom_smooth(method="lm",se=F,color="black",size=0.25, formula = y~x) +
             geom_point(aes(color=std_conc),size=2.5) +
             facet_rep_wrap(~dD_type) + 
-            labs(x = "\u04B4D Observed ( \u2030 )",
-                 y = "\u04B4D Known ( \u2030 )",
+            labs(x = "\u03B4D Observed ( \u2030 )",
+                 y = "\u03B4D Known ( \u2030 )",
                  color = "Standard + Concentration")
         
         list("control_standards" = control_standards,
@@ -630,6 +636,8 @@ control_function <- function(input,normalization_comps,processing_order) {
     }
         
 }
+
+#
 
 derivatization_correction <- function(input,derivatization_table,derivatization_option) {
     
@@ -956,7 +964,7 @@ final_sample_function <- function(input,control_error,control_option,control_sta
                                 DTOutput("control_standards"),
                                 style="height:500px; overflow-y: scroll;overflow-x: scroll"),
                             fluidRow(title = NULL,
-                                     column(width=6,offset=3,align="center",plotOutput("corrections_plot",height = 600)))
+                                     column(width=6,offset=3,align="center",plotlyOutput("corrections_plot",height = 600)))
                         )
                 ),
                 tabItem(tabName = "derivatization_tab",
@@ -1308,7 +1316,8 @@ server <- function(input, output, session) {
                 data()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
                     filter(grepl("drift",id2)) %>%   # drift identification may be in id2
                     ungroup() %>%
-                    unite(mix_comp_class,c(id1,comp,class),sep=" ") %>% select(mix_comp_class) %>% distinct() %>%
+                    mutate(mix_comp_class = paste0(comp_class," (",std_mix,")")) %>% 
+                    select(mix_comp_class) %>% distinct() %>%
                     .$mix_comp_class} else return(NULL)
             })
 
@@ -1355,7 +1364,7 @@ server <- function(input, output, session) {
                                                            searching= FALSE),
                                             class = 'white-space: nowrap',
                                             filter = "top")
-       output$corrections_plot <- renderPlot(control_standards()$corrections_plot)
+       output$corrections_plot <- renderPlotly(control_standards()$corrections_plot)
 
 
    }
