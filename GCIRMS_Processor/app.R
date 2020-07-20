@@ -17,24 +17,25 @@ library(plotly)
 
 #testing
 # {
-#     raw_isodat_file = "Example Export.csv"
-#     gcirms_template_file = "GCIRMS Template.xlsx"
-#     compound_option = "Assigned by IRMS export in Component/comp column."
-#     drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-#     drift_comp = "Mean drift of all compounds"
-#     size_option = "Peak Height (amplitude, mV)"
-#     size_cutoff = 3300
-#     size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
-#     size_small_peak_action = "Remove size effect with 'Small' size effect function."
-#     size_toosmall_peak_action = "Remove these from results."
-#     size_large_peak_action = "No size effect correction."
-#     acceptable_peak_units = "Peak Height (amplitude, mV)"
-#     largest_acceptable_peak = NA
-#     smallest_acceptable_peak = NA
-#     normalization_option = "Linear interpolation between adjacent normalization standards"
-#     normalization_mix = "Jeff QAQC"
-#     normalization_comps = c("C25 Alkane", "C28 Alkane")
-#     derivatization_option = "Template-defined derivative \u03B4D."
+    # setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2020/07_14 Interlab Attempt 3")
+    # raw_isodat_file = "(H2 Export).csv"
+    # gcirms_template_file = "GCIRMS Template (1).xlsx"
+    # compound_option = "Assigned by IRMS export in Component/comp column."
+    # drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+    # drift_comp = "Mean drift of all compounds"
+    # size_option = "Peak Height (amplitude, mV)"
+    # size_cutoff = 3000
+    # size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+    # size_small_peak_action = "Remove size effect with 'Small' size effect function."
+    # size_toosmall_peak_action = "Remove these from results."
+    # size_large_peak_action = "No size effect correction."
+    # acceptable_peak_units = "Peak Height (amplitude, mV)"
+    # largest_acceptable_peak = NA
+    # smallest_acceptable_peak = NA
+    # normalization_option = "Linear interpolation between adjacent normalization standards"
+    # normalization_mix = "Jeff QAQC"
+    # normalization_comps = c("C25 Alkane", "C28 Alkane")
+    # derivatization_option = "Template-defined derivative \u03B4D."
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -221,7 +222,7 @@ drift_function <- function(input,drift_option,drift_comp) {
                    dD_processing = dD_processing - mean(dD_processing)) %>%  # Generate an indexing variable for each set of standard injections... only relevant using drift_type 1
             filter(ifelse(is.na(drift_comp),T,mix_comp_class==drift_comp)) %>% 
             group_by(row,i,row_base) %>% 
-            summarize(dD_mean = mean(dD_processing,na.rm=T)) %>% 
+            summarize(dD_mean = mean(dD_processing,na.rm=T),.groups="keep") %>% 
             group_by(i) %>%
             # The next mutate is doing the heavy lifting of calculating the slopes. Each 'bin' is a given drift sample (i) and the next drift sample (i+1)
             # Since injection-to-injection time is practically constant, row number (row_mean) takes the place of time when calculating drift.
@@ -236,13 +237,15 @@ drift_function <- function(input,drift_option,drift_comp) {
             arrange(row) %>%  # Sort the dataset by compound and then by row. This is important because we use a 'last-observation-carried-forward' command...
             mutate(slope_2 = lm(dD_mean~row)$coefficients[2], # Calculates the slope for drift_type = 2
                    intercept_2 = lm(dD_mean~row)$coefficients[1], # Calculates the intercept for drift_type = 2
-                   slope_1 = na.locf(slope_1), # The slope_1 and slope_1 have been calculated for each drift standard, but we want to use that standard's
-                   intercept_1 = na.locf(intercept_1)) %>% # slope and intercept for every injection until the next drift standard. The na.locf command accomplishes this.
+                   slope_1 = na.locf(slope_1,na.rm=F), # The slope_1 and slope_1 have been calculated for each drift standard, but we want to use that standard's
+                   intercept_1 = na.locf(intercept_1,na.rm=F)) %>% # slope and intercept for every injection until the next drift standard. The na.locf command accomplishes this.
             # Okay, so correction_1 needs some exposition. Because we are doing linear interpolation between each nearest pair of drift standards, we are predicting
             # the dD of a drift standard between those two within the 'round()' command of correction_1. Then, we subtract the grand mean (dD_center) from that value
             # to determine the absolute dD deviation of a drift standard at that row. This estimates the absolute distance (in permil) that a drift standard in a given
             # row would be from the grand mean of dD of actually injected drift standards. The assumption is, of course, that the drift between adjacent drift standards
             # is linear.
+            mutate(slope_1 = na.locf(slope_1,fromLast=T),
+                   intercept_1 = na.locf(intercept_1,fromLast=T)) %>% 
             mutate(correction_1 = round(row * slope_1 + intercept_1,6),
                    correction_2 = (row * slope_2 + intercept_2), # This is just linear regression across all the drift samples.
                    correction_3 = 0) %>% # No correction.
