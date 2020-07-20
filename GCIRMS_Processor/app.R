@@ -17,24 +17,24 @@ library(plotly)
 
 #testing
 # {
-    raw_isodat_file = "Example Export.csv"
-    gcirms_template_file = "GCIRMS Template.xlsx"
-    compound_option = "Assigned by IRMS export in Component/comp column."
-    drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-    drift_comp = "Mean drift of all compounds"
-    size_option = "Peak Height (amplitude, mV)"
-    size_cutoff = 3300
-    size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
-    size_small_peak_action = "Remove size effect with 'Small' size effect function."
-    size_toosmall_peak_action = "Remove these from results."
-    size_large_peak_action = "No size effect correction."
-    acceptable_peak_units = "Peak Height (amplitude, mV)"
-    largest_acceptable_peak = NA
-    smallest_acceptable_peak = NA
-    normalization_option = "Linear interpolation between adjacent normalization standards"
-    normalization_mix = "Jeff QAQC"
-    normalization_comps = c("C25 Alkane", "C28 Alkane")
-    derivatization_option = "Template-defined derivative \u03B4D."
+#     raw_isodat_file = "Example Export.csv"
+#     gcirms_template_file = "GCIRMS Template.xlsx"
+#     compound_option = "Assigned by IRMS export in Component/comp column."
+#     drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+#     drift_comp = "Mean drift of all compounds"
+#     size_option = "Peak Height (amplitude, mV)"
+#     size_cutoff = 3300
+#     size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+#     size_small_peak_action = "Remove size effect with 'Small' size effect function."
+#     size_toosmall_peak_action = "Remove these from results."
+#     size_large_peak_action = "No size effect correction."
+#     acceptable_peak_units = "Peak Height (amplitude, mV)"
+#     largest_acceptable_peak = NA
+#     smallest_acceptable_peak = NA
+#     normalization_option = "Linear interpolation between adjacent normalization standards"
+#     normalization_mix = "Jeff QAQC"
+#     normalization_comps = c("C25 Alkane", "C28 Alkane")
+#     derivatization_option = "Template-defined derivative \u03B4D."
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -589,9 +589,11 @@ control_function <- function(input,normalization_comps,processing_order) {
             select(mix_comp_class,comp_class,conc,std_mix,dD_processing,dD_known) %>% 
             filter(!is.na(dD_known)) %>% 
             mutate(ungrouped_full_rmse = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1)) %>% 
+            group_by(conc) %>% 
+            mutate(conc_grouped_rmse = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1)) %>% 
             group_by(std_mix,conc) %>% 
             mutate(std_mix_rmse = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1)) %>% 
-            group_by(comp_class,conc,std_mix,ungrouped_full_rmse,std_mix_rmse) %>%
+            group_by(comp_class,conc,std_mix,ungrouped_full_rmse,conc_grouped_rmse,std_mix_rmse) %>%
             summarize(observed_value = round(mean(dD_processing),1),
                       observed_sd = round(sd(dD_processing),1),
                       observed_n = n(),
