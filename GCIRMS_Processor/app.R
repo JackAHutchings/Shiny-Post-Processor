@@ -1365,7 +1365,7 @@ server <- function(input, output, session) {
            else return(NULL)})
 
        output$control_standards <- renderDT(control_standards()$control_standards,
-                                            options = list('lengthMenu' = JS('[[10, 25, 50, -1], [10, 25, 50, "All"]]'),
+                                            options = list('lengthMenu' = JS('[[-1,10, 25, 50], ["All",10, 25, 50]]'),
                                                            searching= FALSE),
                                             class = 'white-space: nowrap',
                                             filter = "top")
