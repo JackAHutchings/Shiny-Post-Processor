@@ -17,25 +17,26 @@ library(plotly)
 
 #testing
 # {
-    # setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2020/07_14 Interlab Attempt 3")
-    # raw_isodat_file = "(H2 Export).csv"
-    # gcirms_template_file = "GCIRMS Template (1).xlsx"
-    # compound_option = "Assigned by IRMS export in Component/comp column."
-    # drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-    # drift_comp = "Mean drift of all compounds"
-    # size_option = "Peak Height (amplitude, mV)"
-    # size_cutoff = 3000
-    # size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
-    # size_small_peak_action = "Remove size effect with 'Small' size effect function."
-    # size_toosmall_peak_action = "Remove these from results."
-    # size_large_peak_action = "No size effect correction."
-    # acceptable_peak_units = "Peak Height (amplitude, mV)"
-    # largest_acceptable_peak = NA
-    # smallest_acceptable_peak = NA
-    # normalization_option = "Linear interpolation between adjacent normalization standards"
-    # normalization_mix = "Jeff QAQC"
-    # normalization_comps = c("C25 Alkane", "C28 Alkane")
-    # derivatization_option = "Template-defined derivative \u03B4D."
+# setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/06_02 Chaca PeatSoil Carana UAS and Size")
+# raw_isodat_file = "(H2 Export).csv"
+# gcirms_template_file = "GCIRMS Template.xlsx"
+# compound_option = "Assigned by IRMS export in Component/comp column."
+# drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+# drift_comp = "Mean drift of all compounds"
+# size_option = "Peak Height (amplitude, mV)"
+# size_model_type = "Linear model"
+# size_cutoff = NA
+# size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+# size_small_peak_action = "Remove size effect with 'Small' size effect function."
+# size_toosmall_peak_action = "Remove these from results."
+# size_large_peak_action = "No size effect correction."
+# acceptable_peak_units = "Peak Height (amplitude, mV)"
+# largest_acceptable_peak = NA
+# smallest_acceptable_peak = NA
+# normalization_option = "Linear interpolation between adjacent normalization standards"
+# normalization_mix = "Jeff QAQC"
+# normalization_comps = c("C25 Alkane", "C28 Alkane")
+# derivatization_option = "Template-defined derivative \u03B4D."
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -302,16 +303,23 @@ drift_function <- function(input,drift_option,drift_comp) {
 
 size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,size_small_peak_action,
                           size_toosmall_peak_action,size_large_peak_action,acceptable_peak_units,
-                          largest_acceptable_peak,smallest_acceptable_peak) {
+                          largest_acceptable_peak,smallest_acceptable_peak,size_model_type) {
 
     size_filter <- ifelse(size_option == "Peak Height (amplitude, mV)","ampl",
                    ifelse(size_option == "Peak Area (Vs)","area",
                    ifelse(size_option == "No size effect correction.","ampl",
                     "size_option in size_function broken! Check that the radioButton choices still match!")))
     
+    size_model_option = ifelse(size_model_type == "Linear model",1,
+                      ifelse(size_model_type == "Log-Transformed linear model",2,
+                      ifelse(size_model_type == "Log-transformed, composition-scaled linear model",3,
+                             "size_model_type is broken! Check that the radioButton choices still match!")))
+    
     size_opt_out <- ifelse(size_option == "No size effect correction.",0,1)
     
-    size_label = factor(size_filter,levels = c("area","ampl"),labels = c("Area ( Vs )","Amplitude ( mV )"))
+    size_label_init = factor(size_filter,levels = c("area","ampl"),labels = c("Area ( Vs )","Amplitude ( mV )"))
+    
+    size_label = ifelse(size_model_option %in% c(2,3),paste0("Log-Transformed ",size_label_init),size_label_init)
     
     size_normal_peak_action = ifelse(size_normal_peak_action == "No size effect correction.",0,1)
     size_small_peak_action = ifelse(size_small_peak_action == "No size effect correction.",0,1)
@@ -327,40 +335,83 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
     acceptable_peak_units = ifelse(acceptable_peak_units == "Peak Height (amplitude, mV)","ampl",
                             ifelse(acceptable_peak_units == "Peak Area (Vs)","area",
                                    "acceptable_peak_units in size_function broken! Check that the radioButton choices still match!"))
+    
     smallest_acceptable_peak = ifelse(is.na(smallest_acceptable_peak),0,smallest_acceptable_peak)
     largest_acceptable_peak = ifelse(is.na(largest_acceptable_peak),Inf,largest_acceptable_peak)
     
     size_effect_input <- input %>% filter(grepl("size",id2))
     
         if(length(size_effect_input$id2) > 0) {
-            size_effect_raw <- input %>% filter(comp != "Ref") %>% 
-                filter(grepl("size",id2)) %>% # Grab just the size effect standards
-                gather(size_var,value,area,ampl) %>% group_by(row,id1,comp,class) %>% 
-                mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
-                filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
-                filter(size_var == size_filter) %>% 
-                mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
-                mutate(mix_comp_class = paste(id1,comp,class,sep="_")) %>% 
-                group_by(mix_comp_class) %>% 
-                mutate(dD_zeroed = dD_processing - min(dD_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
-                group_by(size_group) %>% 
-                mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
-                       size_intercept = ifelse(!is.na(size_group),lm(dD_zeroed~value)$coefficients[1],0)) %>%  # Doing segmented size correction requires an intercept.
-                mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
-                       size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
-                mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
-                       size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
-                mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
-                       size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
-                mutate(dD_processing = dD_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
-                group_by(mix_comp_class) %>% 
-                mutate(dD_drift_size_zeroed = dD_processing - mean(dD_processing)) %>% 
-                ungroup() %>% 
-                mutate(size_upper = max(value),
-                       size_lower = min(value),
-                       size_group = ifelse(is.na(size_group),"Normal",size_group))
+            if(size_model_type != 3) {
+                size_effect_raw <- input %>% filter(comp != "Ref") %>% 
+                    filter(grepl("size",id2)) %>% # Grab just the size effect standards
+                    gather(size_var,value,area,ampl) %>% group_by(row,id1,comp,class) %>% 
+                    mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+                    filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+                    filter(size_var == size_filter) %>% 
+                    mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
+                    mutate(mix_comp_class = paste(id1,comp,class,sep="_")) %>% 
+                    group_by(mix_comp_class) %>% 
+                    mutate(dD_zeroed = dD_processing - min(dD_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
+                    rowwise() %>%
+                    mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>%
+                    group_by(size_group) %>% 
+                    mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
+                           size_intercept = lm(dD_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
+                    mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
+                           size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
+                    mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
+                           size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
+                    mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
+                           size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
+                    mutate(dD_processing = dD_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                    rowwise() %>% 
+                    mutate(value = ifelse(size_model_option %in% c(2,3),exp(value),value)) %>% 
+                    group_by(mix_comp_class) %>% 
+                    mutate(dD_drift_size_zeroed = dD_processing - mean(dD_processing)) %>% 
+                    ungroup() %>% 
+                    mutate(size_upper = max(value),
+                           size_lower = min(value),
+                           size_group = ifelse(is.na(size_group),"Normal",size_group))
+                }
             
-            size_raw_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed)) +
+            if(size_model_type == 3) {
+                size_effect_raw <- input %>% filter(comp != "Ref") %>% 
+                    filter(grepl("size",id2)) %>% # Grab just the size effect standards
+                    gather(size_var,value,area,ampl) %>% group_by(row,id1,comp,class) %>% 
+                    mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+                    filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+                    filter(size_var == size_filter) %>% 
+                    mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
+                    mutate(mix_comp_class = paste(id1,comp,class,sep="_")) %>% 
+                    group_by(mix_comp_class) %>% 
+                    mutate(dD_zeroed = dD_processing - min(dD_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
+                    rowwise() %>%
+                    mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>%
+                    group_by(size_group) %>% 
+                    mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
+                           size_intercept = lm(dD_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
+                    mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
+                           size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
+                    mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
+                           size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
+                    mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
+                           size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
+                    mutate(dD_processing = dD_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                    rowwise() %>% 
+                    mutate(value = ifelse(size_model_option %in% c(2,3),exp(value),value)) %>% 
+                    group_by(mix_comp_class) %>% 
+                    mutate(dD_drift_size_zeroed = dD_processing - mean(dD_processing)) %>% 
+                    ungroup() %>% 
+                    mutate(size_upper = max(value),
+                           size_lower = min(value),
+                           size_group = ifelse(is.na(size_group),"Normal",size_group))
+            }
+            
+            
+            size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
+                mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+                ggplot(aes(x=value,y=dD_zeroed)) +
                 geom_point() +
                 facet_wrap(~mix_comp_class,scales="free",nrow=1) +
                 geom_smooth(method="lm",se=F, formula = y~x) +
@@ -368,18 +419,24 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                      x=size_label,
                      y="Uncorrected \u03B4D ( \u2030 )")
             
-            size_raw_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
+            size_raw_grouped_plot <- size_effect_raw %>% 
+                rowwise() %>% 
+                mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+                ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
                 geom_point() +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
                      y="Uncorrected \u03B4D ( \u2030 )",
                      x=size_label)
             
-            size_corrected_bycomp_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_processing)) +
+            size_corrected_bycomp_plot <- size_effect_raw %>% 
+                rowwise() %>% 
+                mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+                ggplot(aes(x=value,y=dD_processing)) +
                 geom_point() +
                 facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
                 geom_smooth(method="lm",se=F, formula = y~x) +
-                labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave 100% identically.",
+                labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
                      y="Size Corrected \u03B4D ( \u2030 )",
                      x=size_label)
             
@@ -405,8 +462,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                 group_by(row,comp,class) %>% 
                 mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
                 filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
-                mutate(size_value = value[which(size_var == size_filter)],
-                       size_lower = size_effect_raw$size_lower[1],
+                mutate(size_value = value[which(size_var == size_filter)]) %>% 
+                group_by(row,comp,class) %>% 
+                mutate(size_lower = size_effect_raw$size_lower[1],
                        size_upper = size_effect_raw$size_upper[1],
                        size_group = ifelse(size_value < size_cutoff & size_value >=size_lower,"Small","Normal"),
                        size_group = ifelse(is.na(size_group),"Normal",size_group),
@@ -414,9 +472,12 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                                     ifelse(size_value > size_upper, "Large",size_group))) %>% 
                 spread(size_var,value) %>% 
                 left_join(size_effect_table,by="size_group") %>% # Get size effect coefficients...
+                rowwise() %>% 
+                mutate(size_value = ifelse(size_model_option %in% c(2,3),log(size_value),size_value)) %>% 
                 mutate(dD_presize = dD_processing,
                        dD_processing = dD_presize - (size_slope*size_value + size_intercept),
-                       dD_size = dD_processing) %>% 
+                       dD_size = dD_processing,
+                       size_value = ifelse(size_model_option %in% c(2,3),exp(size_value),size_value)) %>% 
                 filter(!is.na(dD_processing))
             
             size_correction_plot <- data.frame(variable = size_filter,
@@ -428,10 +489,13 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                        size_group = ifelse(size_value < size_lower, "Too Small",
                                            ifelse(size_value > size_upper, "Large",size_group))) %>% 
                 full_join(size_effect_table,by="size_group") %>% 
+                rowwise() %>% 
+                mutate(size_value = ifelse(size_model_option %in% c(2,3),log(size_value),size_value)) %>% 
                 mutate(size_correction = (size_value*size_slope+size_intercept),
                        size_correction = ifelse(is.na(size_correction),0,size_correction),
                        corrected = 0) %>% 
                 mutate(size_value = ifelse(size_group == "Too Small" & is.na(size_toosmall_peak_action),NA,size_value)) %>% 
+                mutate(size_value = ifelse(size_model_option %in% c(2,3),exp(size_value),size_value)) %>% 
                 filter(!is.na(size_value)) %>% 
                 mutate(size_group = factor(size_group,levels=c("Too Small","Small","Normal","Large"),ordered=T,
                                            labels=c("Smaller Than Size Effect Curve",
@@ -442,7 +506,8 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_action,
                 geom_point() +
                 geom_segment(aes(x = size_value, xend = size_value, y = size_correction, yend = corrected,group = size_value)) +
                 scale_color_brewer(type="qual",palette=2) +
-                labs(x=size_label,
+                scale_y_continuous(n.breaks=8) +
+                labs(x=size_label_init,
                      y="Size Effect Correction (\u2030)",
                      color="Size Group")
                 
@@ -885,6 +950,19 @@ final_sample_function <- function(input,control_error,control_option,control_sta
                                               label = "Enter a cut-off value to perform a segmented size effect correction. Leave blank to use a single regression",
                                               value = NA,
                                               step = 10),
+                                    radioButtons("size_model_type",
+                                                 label = "Select the size model to apply. Log-transformations are applied to the independent variable only. (dD) Composition-scaled 
+                                                 model requires that size standards have a wide range of isotopic compositions. First, rough estimates of isotopic compositions are made 
+                                                 for each size compound by performing an ungrouped, log-transformed linear model identical to the second option in this list. Second, 
+                                                 individual log-transformed linear models are generated for each compound. Individual model slopes (and then intercepts) are regressed via
+                                                 linear model against the rough-corrected isotopic compositions. There is a weak relationship between the slope/intercept of the size effect
+                                                 and the isotopic composition of the compound that we are accounting for. These slope/intercept relationships are used in conjunction with the
+                                                 roughly corrected isotopic compositions to generate slopes/intercepts to ultimately use for size correction. Finally, the size effect for each
+                                                 injection is predicted from the log-transformed size variable using the 'composition-scaled' slopes and intercepts and subtracted from the original,
+                                                 uncorrected dD.",
+                                                 choices = c("Linear model",
+                                                             "Log-Transformed linear model",
+                                                             "Log-transformed, composition-scaled linear model")),
                                     radioButtons("size_small_peak_action",
                                                  label = "Select what action to take for 'Small' size peaks.",
                                                  choices = c("Remove observed size effect.",
@@ -1184,6 +1262,7 @@ server <- function(input, output, session) {
             updateRadioButtons(session,"acceptable_peak_units",selected = ingest()$initials$acceptable_peak_units[1])
             updateNumericInput(session,"largest_acceptable_peak",value = ingest()$initials$largest_acceptable_peak[1])
             updateNumericInput(session,"smallest_acceptable_peak",value = ingest()$initials$smallest_acceptable_peak[1])
+            updateRadioButtons(session,"size_model_type",selected = ingest()$initials$size_model_type[1])
             updateRadioButtons(session,"normalization_option",selected = ingest()$initials$normalization_option[1])
             updateCheckboxGroupInput(session,"normalization_comps",
                                      choices = cal_comp_choices()$mix_comp_class,
@@ -1241,7 +1320,8 @@ server <- function(input, output, session) {
                 {output = if(is.null(ingest()$output)){NULL}
                           else{size_function(data()$data,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
                                              input$size_toosmall_peak_action,
-                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
+                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak,
+                                             input$size_model_type)}}
             if(input$first_correction == "Scale Normalization")
                 {output = if(is.null(ingest()$output)){NULL}
                           else{normalization_function(data()$data,input$normalization_option,input$normalization_comps)}}
@@ -1255,7 +1335,8 @@ server <- function(input, output, session) {
                 {output = if(is.null(first_correction_data()$output)){NULL}
                           else{size_function(first_correction_data()$output,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
                                              input$size_toosmall_peak_action,
-                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
+                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak,
+                                             input$size_model_type)}}
             if(input$second_correction == "Scale Normalization")
                 {output = if(is.null(first_correction_data()$output)){NULL}
                           else{normalization_function(first_correction_data()$output,input$normalization_option,input$normalization_comps)}}
@@ -1269,7 +1350,8 @@ server <- function(input, output, session) {
                 {output = if(is.null(second_correction_data()$output)){NULL}
                           else{size_function(second_correction_data()$output,input$size_option,input$size_cutoff,input$size_normal_peak_action,input$size_small_peak_action,
                                              input$size_toosmall_peak_action,
-                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak)}}
+                                             input$size_large_peak_action,input$acceptable_peak_units,input$largest_acceptable_peak,input$smallest_acceptable_peak,
+                                             input$size_model_type)}}
             if(input$third_correction == "Scale Normalization")
                 {output = if(is.null(second_correction_data()$output)){NULL}
                           else{normalization_function(second_correction_data()$output,input$normalization_option,input$normalization_comps)}}
