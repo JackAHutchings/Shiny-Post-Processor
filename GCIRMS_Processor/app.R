@@ -18,29 +18,26 @@ library(plotly)
 
 #testing
 # {
-setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/06_02 Chaca PeatSoil Carana UAS and Size")
-raw_isodat_file = "(H2 Export).csv"
-gcirms_template_file = "GCIRMS Template.xlsx"
-first_correction = "Drift"
-second_correction = "Size"
-third_correction = "Scale Normalization"
-compound_option = "Assigned by IRMS export in Component/comp column."
-drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-drift_comp = "Mean drift of all compounds"
-size_option = "Peak Height (amplitude, mV)"
-size_model_type = "Linear model"
-size_cutoff = NA
-size_normal_peak_option = "Remove size effect with 'Normal' size effect function."
-size_small_peak_option = "Remove size effect with 'Small' size effect function."
-size_toosmall_peak_option = "Remove these from results."
-size_large_peak_option = "No size effect correction."
-acceptable_peak_units = "Peak Height (amplitude, mV)"
-largest_acceptable_peak = NA
-smallest_acceptable_peak = NA
-normalization_option = "Linear interpolation between adjacent normalization standards"
-normalization_mix = "ACAL"
-normalization_comps = c("C23 Alkane", "C31 Alkane")
-derivatization_option = "Template-defined derivative \u03B4D."
+# setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/06_02 Chaca PeatSoil Carana UAS and Size")
+# raw_isodat_file = "(H2 Export).csv"
+# gcirms_template_file = "GCIRMS Template.xlsx"
+# compound_option = "Assigned by IRMS export in Component/comp column."
+# drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+# drift_comp = "Mean drift of all compounds"
+# size_option = "Peak Height (amplitude, mV)"
+# size_model_type = "Linear model"
+# size_cutoff = NA
+# size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+# size_small_peak_action = "Remove size effect with 'Small' size effect function."
+# size_toosmall_peak_action = "Remove these from results."
+# size_large_peak_action = "No size effect correction."
+# acceptable_peak_units = "Peak Height (amplitude, mV)"
+# largest_acceptable_peak = NA
+# smallest_acceptable_peak = NA
+# normalization_option = "Linear interpolation between adjacent normalization standards"
+# normalization_mix = "ACAL"
+# normalization_comps = c("C23 Alkane", "C31 Alkane")
+# derivatization_option = "Template-defined derivative \u03B4D."
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -549,6 +546,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                            Large = Normal*size_large_peak_action) %>% 
                     gather(size_group,value,Large,Normal,Small,`Too Small`) %>% 
                     spread(size_coef,value)
+
                 
                 output <- input %>% filter(comp != "Ref") %>% 
                     gather(size_var,value,area,ampl) %>% 
@@ -575,6 +573,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     select(-c(general_intercept:slope_vs_dD_slope)) %>% 
                     filter(!is.na(dD_processing))
                 
+
                 size_correction_plot <- data.frame(variable = size_filter,
                                                    size_value = seq(from=0,to=max(output$size_value),by=100),
                                                    size_lower = size_effect_raw$size_lower[1],
