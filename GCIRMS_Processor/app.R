@@ -18,6 +18,7 @@ library(plotly)
 
 #testing
 # {
+<<<<<<< HEAD
 setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/06_02 Chaca PeatSoil Carana UAS and Size")
 raw_isodat_file = "(H2 Export).csv"
 gcirms_template_file = "GCIRMS Template.xlsx"
@@ -41,6 +42,28 @@ normalization_option = "Linear interpolation between adjacent normalization stan
 normalization_mix = "ACAL"
 normalization_comps = c("C23 Alkane", "C31 Alkane")
 derivatization_option = "Template-defined derivative \u03B4D."
+=======
+# setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/06_02 Chaca PeatSoil Carana UAS and Size")
+# raw_isodat_file = "(H2 Export).csv"
+# gcirms_template_file = "GCIRMS Template.xlsx"
+# compound_option = "Assigned by IRMS export in Component/comp column."
+# drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+# drift_comp = "Mean drift of all compounds"
+# size_option = "Peak Height (amplitude, mV)"
+# size_model_type = "Linear model"
+# size_cutoff = NA
+# size_normal_peak_action = "Remove size effect with 'Normal' size effect function."
+# size_small_peak_action = "Remove size effect with 'Small' size effect function."
+# size_toosmall_peak_action = "Remove these from results."
+# size_large_peak_action = "No size effect correction."
+# acceptable_peak_units = "Peak Height (amplitude, mV)"
+# largest_acceptable_peak = NA
+# smallest_acceptable_peak = NA
+# normalization_option = "Linear interpolation between adjacent normalization standards"
+# normalization_mix = "ACAL"
+# normalization_comps = c("C23 Alkane", "C31 Alkane")
+# derivatization_option = "Template-defined derivative \u03B4D."
+>>>>>>> 0ea01561d47b6f49740380d929125b1917a33ac9
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -485,7 +508,11 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     gather(size_var,value,area,ampl) %>% 
                     group_by(row,comp,class) %>% 
                     mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+<<<<<<< HEAD
                     filter(acceptable_peak_value > smallest_acceptable_peak_action & acceptable_peak_value < largest_acceptable_peak_action) %>% 
+=======
+                    filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+>>>>>>> 0ea01561d47b6f49740380d929125b1917a33ac9
                     mutate(size_value = value[which(size_var == size_filter)]) %>% 
                     group_by(row,comp,class) %>% 
                     mutate(size_lower = size_effect_raw$size_lower[1],
@@ -549,6 +576,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                            Large = Normal*size_large_peak_action) %>% 
                     gather(size_group,value,Large,Normal,Small,`Too Small`) %>% 
                     spread(size_coef,value)
+<<<<<<< HEAD
                 
                 output <- input %>% filter(comp != "Ref") %>% 
                     gather(size_var,value,area,ampl) %>% 
@@ -575,6 +603,34 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     select(-c(general_intercept:slope_vs_dD_slope)) %>% 
                     filter(!is.na(dD_processing))
                 
+=======
+                
+                output <- input %>% filter(comp != "Ref") %>% 
+                    gather(size_var,value,area,ampl) %>% 
+                    group_by(row,comp,class) %>% 
+                    mutate(acceptable_peak_value = value[which(size_var == acceptable_peak_units)]) %>% 
+                    filter(acceptable_peak_value > smallest_acceptable_peak & acceptable_peak_value < largest_acceptable_peak) %>% 
+                    mutate(size_value = value[which(size_var == size_filter)]) %>% 
+                    group_by(row,comp,class) %>% 
+                    mutate(size_lower = size_effect_raw$size_lower[1],
+                           size_upper = size_effect_raw$size_upper[1],
+                           size_group = ifelse(size_value < size_cutoff & size_value >=size_lower,"Small","Normal"),
+                           size_group = ifelse(is.na(size_group),"Normal",size_group),
+                           size_group = ifelse(size_value < size_lower, "Too Small",
+                                               ifelse(size_value > size_upper, "Large",size_group))) %>% 
+                    spread(size_var,value) %>% 
+                    left_join(size_effect_table,by="size_group") %>% # Get size effect coefficients...
+                    rowwise() %>% 
+                    mutate(dD_presize = dD_processing,
+                           dD_stage1_correction = dD_presize - (general_slope * log(size_value) + general_intercept),
+                           size_slope = slope_vs_dD_slope * dD_stage1_correction + slope_vs_dD_intercept,
+                           size_intercept = intercept_vs_dD_slope * dD_stage1_correction + intercept_vs_dD_intercept,
+                           dD_processing = dD_presize - (size_slope*log(size_value) + size_intercept),
+                           dD_size = dD_processing) %>% 
+                    select(-c(general_intercept:slope_vs_dD_slope)) %>% 
+                    filter(!is.na(dD_processing))
+                
+>>>>>>> 0ea01561d47b6f49740380d929125b1917a33ac9
                 size_correction_plot <- data.frame(variable = size_filter,
                                                    size_value = seq(from=0,to=max(output$size_value),by=100),
                                                    size_lower = size_effect_raw$size_lower[1],
