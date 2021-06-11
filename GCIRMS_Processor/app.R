@@ -1270,6 +1270,7 @@ final_sample_function <- function(final_data,
                         fluidPage(
                             box(title = NULL,
                                 width = 12,
+                                textInput("exportfilename",label = "Enter a name for the export document or leave blank to use today's date.",value=""),
                                 downloadButton("exportresults", label = "Export Processed Report")),
                             box(title = "Sample Report",
                                 width = 12,
@@ -1690,7 +1691,7 @@ server <- function(input, output, session) {
             )})
         
         output$exportresults <- downloadHandler(
-            filename = paste0(Sys.Date()," Processing Report.xlsx"),
+            filename = function(){ifelse(input$exportfilename=="",paste0(Sys.Date()," Processing Report.xlsx"),paste0(input$exportfilename,".xlsx"))},
             content = function(file){
                 write_xlsx(list("Sample Report" = final_results()$sample_report,
                                 "Standard Report" = final_results()$standard_report,
@@ -1707,6 +1708,7 @@ server <- function(input, output, session) {
             contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
+
         output$sample_report <- renderDT(final_results()$sample_report,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         output$initials <- renderDT(final_results()$initials,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
 
