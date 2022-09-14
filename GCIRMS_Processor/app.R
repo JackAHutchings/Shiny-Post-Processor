@@ -18,26 +18,26 @@ library(plotly)
 
 #testing
 # {
-setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/02_25 Chacacocha Posturea Batch 3")
-raw_isodat_file = "Nadia_06_18_2021(H2 Export).csv"
-gcirms_template_file = "GCIRMS Template.xlsx"
-compound_option = "Assigned by IRMS export in Component/comp column."
-drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-drift_comp = "Mean drift of all compounds"
-size_option = "Peak Height (amplitude, mV)"
-size_model_type = "Linear model"
-size_cutoff = NA
-size_normal_peak_option = "Remove size effect with 'Normal' size effect function."
-size_small_peak_option = "Remove size effect with 'Small' size effect function."
-size_toosmall_peak_option = "Remove these from results."
-size_large_peak_option = "No size effect correction."
-acceptable_peak_units = "Peak Height (amplitude, mV)"
-largest_acceptable_peak = NA
-smallest_acceptable_peak = NA
-normalization_option = "Linear interpolation between adjacent normalization standards"
-normalization_mix = "ACAL"
-normalization_comps = c("C23 Alkane", "C31 Alkane")
-derivatization_option = "Template-defined derivative \u03B4D."
+# setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/02_25 Chacacocha Posturea Batch 3")
+# raw_isodat_file = "Nadia_06_18_2021(H2 Export).csv"
+# gcirms_template_file = "GCIRMS Template.xlsx"
+# compound_option = "Assigned by IRMS export in Component/comp column."
+# drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+# drift_comp = "Mean drift of all compounds"
+# size_option = "Peak Height (amplitude, mV)"
+# size_model_type = "Linear model"
+# size_cutoff = NA
+# size_normal_peak_option = "Remove size effect with 'Normal' size effect function."
+# size_small_peak_option = "Remove size effect with 'Small' size effect function."
+# size_toosmall_peak_option = "Remove these from results."
+# size_large_peak_option = "No size effect correction."
+# acceptable_peak_units = "Peak Height (amplitude, mV)"
+# largest_acceptable_peak = NA
+# smallest_acceptable_peak = NA
+# normalization_option = "Linear interpolation between adjacent normalization standards"
+# normalization_mix = "ACAL"
+# normalization_comps = c("C23 Alkane", "C31 Alkane")
+# derivatization_option = "Template-defined derivative \u03B4D."
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
