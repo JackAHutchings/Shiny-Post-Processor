@@ -982,7 +982,7 @@ final_sample_function <- function(final_data,
 {
     ui <- dashboardPage(
         skin = "green",
-        dashboardHeader(title = "GC-IRMS \u03B4\u00B9\u00B3"),
+        dashboardHeader(title = "GC-IRMS \u03B4\u00B9\u00B3C"),
         dashboardSidebar(
             sidebarMenu(
                 menuItem("Ingest Data",tabName = "ingest_tab",icon = icon("table")),
@@ -1375,8 +1375,8 @@ server <- function(input, output, session) {
         })
         
         demo_paths <- eventReactive(input$load_demos,{
-                   c("https://raw.githubusercontent.com/JackAHutchings/Shiny-Post-Processor/master/GCIRMS_Processor/Example%20Export.csv",
-                     "https://github.com/JackAHutchings/Shiny-Post-Processor/blob/master/GCIRMS_Processor/GCIRMS%20Template.xlsx?raw=true")
+                   c("https://raw.githubusercontent.com/JackAHutchings/Shiny-Post-Processor/master/GCIRMS_d13C_Processor/Example%20Export.csv",
+                     "https://github.com/JackAHutchings/Shiny-Post-Processor/blob/master/GCIRMS_d13C_Processor/GCIRMS%20C%20Template.xlsx?raw=true")
         })
         
         ingest <- reactive({
