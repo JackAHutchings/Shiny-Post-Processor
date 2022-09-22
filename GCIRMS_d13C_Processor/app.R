@@ -18,29 +18,29 @@ library(plotly)
 
 # testing
 {
-  setwd("C:/github/Shiny-Post-Processor/GCIRMS_d13C_Processor")
-  raw_isodat_file = "Example Export.csv"
-  gcirms_template_file = "GCIRMS C Template.xlsx"
-  compound_option = "Assigned by IRMS export in Component/comp column."
-  first_correction = "Drift"
-  second_correction = "Size"
-  third_correction = "Scale Normalization"
-  drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-  drift_comp = "Mean drift of all compounds"
-  size_option = "Peak Height (amplitude, mV)"
-  size_model_type = "Log-transformed, composition-scaled linear model"
-  size_cutoff = NA
-  size_toosmall_peak_action = "Remove these from results."
-  size_small_peak_action = "Remove observed size effect."
-  size_normal_peak_action = "Remove observed size effect."
-  size_large_peak_action = "Remove size effect with 'Normal' size effect function."
-  acceptable_peak_units = "Peak Height (amplitude, mV)"
-  largest_acceptable_peak = NA
-  smallest_acceptable_peak = NA
-  normalization_option = "Linear interpolation between adjacent normalization standards (use this if drift-correction is untenable)"
-  normalization_mix = "ACAL"
-  normalization_comps = c("C23 Alkane", "C31 Alkane")
-  derivatization_option = "Template-defined derivative \u03B4\u00b9\u00b3C."
+  # setwd("C:/github/Shiny-Post-Processor/GCIRMS_d13C_Processor")
+  # raw_isodat_file = "Example Export.csv"
+  # gcirms_template_file = "GCIRMS C Template.xlsx"
+  # compound_option = "Assigned by IRMS export in Component/comp column."
+  # first_correction = "Drift"
+  # second_correction = "Size"
+  # third_correction = "Scale Normalization"
+  # drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
+  # drift_comp = "Mean drift of all compounds"
+  # size_option = "Peak Height (amplitude, mV)"
+  # size_model_type = "Log-transformed, composition-scaled linear model"
+  # size_cutoff = NA
+  # size_toosmall_peak_option = "Remove these from results."
+  # size_small_peak_option = "Remove observed size effect."
+  # size_normal_peak_option = "Remove observed size effect."
+  # size_large_peak_option = "Remove size effect with 'Normal' size effect function."
+  # acceptable_peak_units = "Peak Height (amplitude, mV)"
+  # largest_acceptable_peak = NA
+  # smallest_acceptable_peak = NA
+  # normalization_option = "Linear interpolation between adjacent normalization standards (use this if drift-correction is untenable)"
+  # normalization_mix = "ACAL"
+  # normalization_comps = c("C23 Alkane (ACAL)", "C25 Alkane (ACAL)")
+  # derivatization_option = "Template-defined derivative \u03B4\u00b9\u00b3C."
 }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -154,18 +154,20 @@ comp_assign_function <- function(input,standard_info,compound_option) {
 
     #IRMS Drift Plot
     irms_drift_calc <- data %>%
-        mutate(slope = lm(d13C_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to dD relationship... slope first...
+        mutate(slope = lm(d13C_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to d13C relationship... slope first...
                intercept = lm(d13C_raw~raw_R)$coefficients[1], # ... then intercept
-               rawraw_d13C = raw_R * slope + intercept) %>%  # Estimate the dD of each ref peak using the above relationship.
+               rawraw_d13C = raw_R * slope + intercept) %>%  # Estimate the d13C of each ref peak using the above relationship.
         filter(grepl("Ref",comp)) %>%
         mutate(leftcenter_d13C = rawraw_d13C - mean(rawraw_d13C[which(row==min(row))])) %>% # Center the extra raw 'rawraw_d13C' on the first injection, so that we can see how drift proceeded.
         group_by(row) %>%
         mutate(sd = sd(leftcenter_d13C)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
     
     if(length(irms_drift_calc$comp) == 0){
-        plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,label="No Reference Gas Peaks Found.\n\nReference gas peaks should be identified and their name should start with\n'Ref' (i.e., Ref 1 or Reference 1) in the Component/comp column.",color="red")+theme_void()
+        plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,
+                                             label="No Reference Gas Peaks Found.\n\nReference gas peaks should be identified and their name should start with\n'Ref' (i.e., Ref 1 or Reference 1) in the Component/comp column.",
+                                             color="red")+theme_void()
     } else {
-        # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "dD_raw" value that we calibrate.
+        # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "d13C_raw" value that we calibrate.
         # As such, we do not need to correct for this drift at all. Instead, it is just a helpful visualization of how much drift the IRMS experienced during the run.
         # If this is huge (i.e., > 25 permil in range), then maybe it can be diagnostic of a problem...
         plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=leftcenter_d13C)) +
@@ -215,7 +217,7 @@ drift_function <- function(input,drift_option,drift_comp) {
             facet_wrap(~comp_class,scales="free_y") +
             labs(title = "Uncorrected Drift Standards",
                  x = "Injection # in Sequence",
-                 y = "Raw \u03B4D (\u2030)")
+                 y = "Raw \u03B4\u00b9\u00b3C (\u2030)")
         drift_comp_action <- ifelse(drift_comp == "Mean drift of all compounds",NA,drift_comp)
         drift_type <- ifelse(drift_option == "Linear interpolation between adjacent drift samples (use this when drift appears non-linear)",1,
                       ifelse(drift_option == "Linear regression across all drift samples (use this when drift appears linear)",2,
@@ -229,27 +231,27 @@ drift_function <- function(input,drift_option,drift_comp) {
                    d13C_processing = d13C_processing - mean(d13C_processing)) %>%  # Generate an indexing variable for each set of standard injections... only relevant using drift_type 1
             filter(ifelse(is.na(drift_comp_action),T,mix_comp_class==drift_comp_action)) %>% 
             group_by(row,i,row_base) %>% 
-            summarize(dD_mean = mean(d13C_processing,na.rm=T),.groups="keep") %>% 
+            summarize(d13C_mean = mean(d13C_processing,na.rm=T),.groups="keep") %>% 
             group_by(i) %>%
             # The next mutate is doing the heavy lifting of calculating the slopes. Each 'bin' is a given drift sample (i) and the next drift sample (i+1)
             # Since injection-to-injection time is practically constant, row number (row_mean) takes the place of time when calculating drift.
             # We are basically just doing a two point linear regression to find the slope and y-intercept of the line.
-            mutate(slope_1 = lm(dD_mean~row,data=na.omit(.[which((.$i == i[1] | .$i == i[1]+1 )),]))$coefficients[2],
-                   intercept_1 = lm(dD_mean~row,data=na.omit(.[which((.$i == i[1] | .$i == i[1]+1 )),]))$coefficients[1]) %>% 
+            mutate(slope_1 = lm(d13C_mean~row,data=na.omit(.[which((.$i == i[1] | .$i == i[1]+1 )),]))$coefficients[2],
+                   intercept_1 = lm(d13C_mean~row,data=na.omit(.[which((.$i == i[1] | .$i == i[1]+1 )),]))$coefficients[1]) %>% 
             ungroup() %>% 
             mutate(slope_1 = ifelse(i == max(i),slope_1[which(i == max(i)-1)],slope_1), # Assigns second to last slope to the last drift set.
                    intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1)) %>% # Same as above.
             # Next, we need to make a data frame to fill in all the rows (injections) that occurred between the drift samples.
             full_join(data.frame(row = seq(1,max(input$row))),by="row") %>% 
             arrange(row) %>%  # Sort the dataset by compound and then by row. This is important because we use a 'last-observation-carried-forward' command...
-            mutate(slope_2 = lm(dD_mean~row)$coefficients[2], # Calculates the slope for drift_type = 2
-                   intercept_2 = lm(dD_mean~row)$coefficients[1], # Calculates the intercept for drift_type = 2
+            mutate(slope_2 = lm(d13C_mean~row)$coefficients[2], # Calculates the slope for drift_type = 2
+                   intercept_2 = lm(d13C_mean~row)$coefficients[1], # Calculates the intercept for drift_type = 2
                    slope_1 = na.locf(slope_1,na.rm=F), # The slope_1 and slope_1 have been calculated for each drift standard, but we want to use that standard's
                    intercept_1 = na.locf(intercept_1,na.rm=F)) %>% # slope and intercept for every injection until the next drift standard. The na.locf command accomplishes this.
             # Okay, so correction_1 needs some exposition. Because we are doing linear interpolation between each nearest pair of drift standards, we are predicting
-            # the dD of a drift standard between those two within the 'round()' command of correction_1. Then, we subtract the grand mean (dD_center) from that value
-            # to determine the absolute dD deviation of a drift standard at that row. This estimates the absolute distance (in permil) that a drift standard in a given
-            # row would be from the grand mean of dD of actually injected drift standards. The assumption is, of course, that the drift between adjacent drift standards
+            # the d13C of a drift standard between those two within the 'round()' command of correction_1. Then, we subtract the grand mean (d13C_center) from that value
+            # to determine the absolute d13C deviation of a drift standard at that row. This estimates the absolute distance (in permil) that a drift standard in a given
+            # row would be from the grand mean of d13C of actually injected drift standards. The assumption is, of course, that the drift between adjacent drift standards
             # is linear.
             mutate(slope_1 = na.locf(slope_1,fromLast=T),
                    intercept_1 = na.locf(intercept_1,fromLast=T)) %>% 
@@ -266,20 +268,20 @@ drift_function <- function(input,drift_option,drift_comp) {
         output <- full_join(input %>% filter(comp != "Ref"), # Removes the reference peaks.
                                       drift_correction %>% select(row,method,drift_correction) %>% distinct(), #Cleans up the drift_correction a bit.
                                       by = "row") %>% 
-            mutate(dD_predrift = d13C_processing,
+            mutate(d13C_predrift = d13C_processing,
                    d13C_processing = d13C_processing - drift_correction,
-                   dD_drift = d13C_processing)
+                   d13C_drift = d13C_processing)
         
         drift_corrected_standards_plot <- ggplot(output %>% filter(grepl("drift",id2)),aes(x=row,y=d13C_processing)) +
-            geom_segment(aes(x = row, xend = row, y = dD_predrift, yend = d13C_processing)) +
+            geom_segment(aes(x = row, xend = row, y = d13C_predrift, yend = d13C_processing)) +
             geom_point(color="blue",size=1.5) +
-            geom_point(aes(x=row,y=dD_predrift),size=1.5) +
+            geom_point(aes(x=row,y=d13C_predrift),size=1.5) +
             geom_smooth(method="lm",se=F, formula = y~x) +
             facet_wrap(~comp,scales="free_y") +
             labs(title = "Drift-Corrected Drift Standards",
                  subtitle = "Blue = Corrected, Black = Uncorrected",
                  x = "Injection # in Sequence",
-                 y = "Uncalibrated \u03B4D (\u2030)")
+                 y = "Uncalibrated \u03B4\u00b9\u00b3C (\u2030)")
         
         drift_correction_by_row_plot <- ggplot(drift_correction,aes(x=row,y=drift_correction)) +
             geom_hline(aes(yintercept = 0),color="blue") +
@@ -296,9 +298,9 @@ drift_function <- function(input,drift_option,drift_comp) {
              "drift_correction_by_row_plot" = drift_correction_by_row_plot)
     } else {
         output <- input %>% filter(comp != "Ref") %>% 
-            mutate(dD_predrift = d13C_processing,
-                   d13C_processing = dD_predrift,
-                   dD_drift = d13C_processing)
+            mutate(d13C_predrift = d13C_processing,
+                   d13C_processing = d13C_predrift,
+                   d13C_drift = d13C_processing)
         
         list("output" = output,
              "drift_correction" = ggplot()+annotate("text",x=0,y=0,label="No Drift Standards Found.",color="red")+theme_void(),
@@ -360,23 +362,23 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
                     mutate(mix_comp_class = paste(id1,comp,class,sep="_")) %>% 
                     group_by(mix_comp_class) %>% 
-                    mutate(dD_zeroed = d13C_processing - min(d13C_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
+                    mutate(d13C_zeroed = d13C_processing - min(d13C_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
                     rowwise() %>%
                     mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>%
                     group_by(size_group) %>% 
-                    mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
-                           size_intercept = lm(dD_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
+                    mutate(size_slope = lm(d13C_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
+                           size_intercept = lm(d13C_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
                     mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
                            size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
                     mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
                     mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
-                    mutate(d13C_processing = d13C_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                    mutate(d13C_processing = d13C_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the d13C 'anomaly'.)
                     rowwise() %>% 
                     mutate(value = ifelse(size_model_option %in% c(2,3),exp(value),value)) %>% 
                     group_by(mix_comp_class) %>% 
-                    mutate(dD_drift_size_zeroed = d13C_processing - mean(d13C_processing)) %>% 
+                    mutate(d13C_drift_size_zeroed = d13C_processing - mean(d13C_processing)) %>% 
                     ungroup() %>% 
                     mutate(size_upper = max(value),
                            size_lower = min(value),
@@ -393,38 +395,38 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
                     mutate(mix_comp_class = paste(id1,comp,class,sep="_")) %>% 
                     group_by(mix_comp_class) %>% 
-                    mutate(dD_zeroed = d13C_processing - min(d13C_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
+                    mutate(d13C_zeroed = d13C_processing - min(d13C_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
                     rowwise() %>%
                     mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>%
                     group_by(size_group,mix_comp_class) %>% 
-                    mutate(comp_specific_slope = lm(dD_zeroed~value)$coefficients[2],
-                           comp_specific_intercept = lm(dD_zeroed~value)$coefficients[1]) %>% 
+                    mutate(comp_specific_slope = lm(d13C_zeroed~value)$coefficients[2],
+                           comp_specific_intercept = lm(d13C_zeroed~value)$coefficients[1]) %>% 
                     group_by(size_group) %>% 
-                    mutate(general_slope = lm(dD_zeroed~value)$coefficients[2],
-                           general_intercept = lm(dD_zeroed~value)$coefficients[1],
+                    mutate(general_slope = lm(d13C_zeroed~value)$coefficients[2],
+                           general_intercept = lm(d13C_zeroed~value)$coefficients[1],
                            stage1_correction = d13C_processing - (general_slope*value + general_intercept)) %>% 
                     group_by(size_group,mix_comp_class) %>% 
                     mutate(stage1_correction = mean(stage1_correction)) %>% 
                     group_by(size_group) %>% 
-                    mutate(slope_vs_dD_slope = lm(comp_specific_slope~stage1_correction)$coefficients[2],
-                           slope_vs_dD_intercept = lm(comp_specific_slope~stage1_correction)$coefficients[1],
-                           intercept_vs_dD_slope = lm(comp_specific_intercept~stage1_correction)$coefficients[2],
-                           intercept_vs_dD_intercept = lm(comp_specific_intercept~stage1_correction)$coefficients[1]) %>% 
-                    mutate(size_slope = slope_vs_dD_slope * stage1_correction + slope_vs_dD_intercept,
-                           size_intercept = intercept_vs_dD_slope * stage1_correction + intercept_vs_dD_intercept) %>% 
-                    mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
-                           size_intercept = lm(dD_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
+                    mutate(slope_vs_d13C_slope = lm(comp_specific_slope~stage1_correction)$coefficients[2],
+                           slope_vs_d13C_intercept = lm(comp_specific_slope~stage1_correction)$coefficients[1],
+                           intercept_vs_d13C_slope = lm(comp_specific_intercept~stage1_correction)$coefficients[2],
+                           intercept_vs_d13C_intercept = lm(comp_specific_intercept~stage1_correction)$coefficients[1]) %>% 
+                    mutate(size_slope = slope_vs_d13C_slope * stage1_correction + slope_vs_d13C_intercept,
+                           size_intercept = intercept_vs_d13C_slope * stage1_correction + intercept_vs_d13C_intercept) %>% 
+                    mutate(size_slope = lm(d13C_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
+                           size_intercept = lm(d13C_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
                     mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
                            size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
                     mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
                     mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
-                    mutate(d13C_processing = d13C_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                    mutate(d13C_processing = d13C_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the d13C 'anomaly'.)
                     rowwise() %>% 
                     mutate(value = ifelse(size_model_option %in% c(2,3),exp(value),value)) %>% 
                     group_by(mix_comp_class) %>% 
-                    mutate(dD_drift_size_zeroed = d13C_processing - mean(d13C_processing)) %>% 
+                    mutate(d13C_drift_size_zeroed = d13C_processing - mean(d13C_processing)) %>% 
                     ungroup() %>% 
                     mutate(size_upper = max(value),
                            size_lower = min(value),
@@ -434,22 +436,22 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             
             size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
                 mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                ggplot(aes(x=value,y=dD_zeroed)) +
+                ggplot(aes(x=value,y=d13C_zeroed)) +
                 geom_point() +
                 facet_wrap(~mix_comp_class,scales="free",nrow=1) +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
                      x=size_label,
-                     y="Uncorrected \u03B4D ( \u2030 )")
+                     y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )")
             
             size_raw_grouped_plot <- size_effect_raw %>% 
                 rowwise() %>% 
                 mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
+                ggplot(aes(x=value,y=d13C_zeroed,color=size_group)) +
                 geom_point() +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
-                     y="Uncorrected \u03B4D ( \u2030 )",
+                     y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
                      x=size_label)
             
             size_corrected_bycomp_plot <- size_effect_raw %>% 
@@ -460,14 +462,14 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                 facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
-                     y="Size Corrected \u03B4D ( \u2030 )",
+                     y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
                      x=size_label)
             
-            size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
+            size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
                 geom_point(aes(color=mix_comp_class)) +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Corrected plot of size effect standards.",
-                     y="Size Corrected \u03B4D ( \u2030 )",
+                     y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
                      x=size_label)
             
             if(size_model_option != 3){
@@ -499,9 +501,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     left_join(size_effect_table,by="size_group") %>% # Get size effect coefficients...
                     rowwise() %>% 
                     mutate(size_value = ifelse(size_model_option %in% c(2,3),log(size_value),size_value)) %>% 
-                    mutate(dD_presize = d13C_processing,
-                           d13C_processing = dD_presize - (size_slope*size_value + size_intercept),
-                           dD_size = d13C_processing,
+                    mutate(d13C_presize = d13C_processing,
+                           d13C_processing = d13C_presize - (size_slope*size_value + size_intercept),
+                           d13C_size = d13C_processing,
                            size_value = ifelse(size_model_option %in% c(2,3),exp(size_value),size_value)) %>% 
                     filter(!is.na(d13C_processing))
                 
@@ -539,7 +541,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             
             if(size_model_option == 3){
                 size_effect_table <- data.frame(size_group = c("Too Small","Small","Normal","Large")) %>% mutate(size_group = as.character(size_group)) %>% 
-                    left_join(size_effect_raw %>% select(size_group,general_slope,general_intercept,slope_vs_dD_slope,slope_vs_dD_intercept,intercept_vs_dD_slope,intercept_vs_dD_intercept) %>% 
+                    left_join(size_effect_raw %>% select(size_group,general_slope,general_intercept,slope_vs_d13C_slope,slope_vs_d13C_intercept,intercept_vs_d13C_slope,intercept_vs_d13C_intercept) %>% 
                                   distinct(),by="size_group") %>% 
                     pivot_longer(cols = -c("size_group"),
                                  names_to = "size_coef",
@@ -568,13 +570,13 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     spread(size_var,value) %>% 
                     left_join(size_effect_table,by="size_group") %>% # Get size effect coefficients...
                     rowwise() %>% 
-                    mutate(dD_presize = d13C_processing,
-                           dD_stage1_correction = dD_presize - (general_slope * log(size_value) + general_intercept),
-                           size_slope = slope_vs_dD_slope * dD_stage1_correction + slope_vs_dD_intercept,
-                           size_intercept = intercept_vs_dD_slope * dD_stage1_correction + intercept_vs_dD_intercept,
-                           d13C_processing = dD_presize - (size_slope*log(size_value) + size_intercept),
-                           dD_size = d13C_processing) %>% 
-                    select(-c(general_intercept:slope_vs_dD_slope)) %>% 
+                    mutate(d13C_presize = d13C_processing,
+                           d13C_stage1_correction = d13C_presize - (general_slope * log(size_value) + general_intercept),
+                           size_slope = slope_vs_d13C_slope * d13C_stage1_correction + slope_vs_d13C_intercept,
+                           size_intercept = intercept_vs_d13C_slope * d13C_stage1_correction + intercept_vs_d13C_intercept,
+                           d13C_processing = d13C_presize - (size_slope*log(size_value) + size_intercept),
+                           d13C_size = d13C_processing) %>% 
+                    select(-c(general_intercept:slope_vs_d13C_slope)) %>% 
                     filter(!is.na(d13C_processing))
                 
 
@@ -608,7 +610,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     labs(x=size_label_init,
                          y="Size Effect Correction (\u2030)",
                          color="Size Group",
-                         subtitle="Approximate size correction only! Individual compounds have had their size correction functions adjusted as a linear model of their observed dD!")
+                         subtitle="Approximate size correction only! Individual compounds have had their size correction functions adjusted as a linear model of their observed d13C!")
                 
             }
             
@@ -633,9 +635,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                        size_upper = NA,
                        size_group = NA) %>% 
                 spread(size_var,value) %>% 
-                mutate(dD_presize = d13C_processing,
-                       d13C_processing = dD_presize,
-                       dD_size = d13C_processing) %>% 
+                mutate(d13C_presize = d13C_processing,
+                       d13C_processing = d13C_presize,
+                       d13C_size = d13C_processing) %>% 
                 filter(!is.na(d13C_processing))
             
             list("output" = output,
@@ -671,20 +673,20 @@ normalization_function <- function(input,normalization_option,normalization_comp
             mutate(mix_comp_class = paste0(comp_class," (",id1,")")) %>% 
             mutate(comps_boolean = any(mix_comp_class %in% comps_to_use)) %>% 
             filter(ifelse(comps_boolean,mix_comp_class %in% comps_to_use,comps_boolean)) %>% 
-            filter(!is.na(dD_known)) %>% 
-            select(row,row_base,std_mix,id2,comp,class,dD_known,d13C_processing) %>% 
+            filter(!is.na(d13C_known)) %>% 
+            select(row,row_base,std_mix,id2,comp,class,d13C_known,d13C_processing) %>% 
             ungroup() %>% 
             mutate(i = dense_rank((row_base))) %>%  # Generate an indexing variable for each set of standard injections... only relevant using normalization_option 1
             group_by(i) %>% 
             # The next mutate is doing the heavy lifting. Each 'bin' is a given standard (i) and the next standard (i+1)
             # We are basically just doing a two point linear regression to find the slope and y-intercept of the line.
-            mutate(slope_1 = lm(dD_known~d13C_processing,data=.[which(.$i == i[1] | .$i == i[1]+1 ),])$coefficients[2],
-                   intercept_1 = lm(dD_known~d13C_processing,data=.[which(.$i == i[1] | .$i == i[1]+1 ),])$coefficients[1]) %>% 
+            mutate(slope_1 = lm(d13C_known~d13C_processing,data=.[which(.$i == i[1] | .$i == i[1]+1 ),])$coefficients[2],
+                   intercept_1 = lm(d13C_known~d13C_processing,data=.[which(.$i == i[1] | .$i == i[1]+1 ),])$coefficients[1]) %>% 
             ungroup() %>% 
             mutate(slope_1 = ifelse(i == max(i),slope_1[which(i == max(i)-1)],slope_1), # Assigns second to last slope to the last standard set.
                    intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1), # Same as above.
-                   slope_2 = lm(dD_known~d13C_processing)$coefficients[2], # Calculates the slope for normalization_option = 2
-                   intercept_2 = lm(dD_known~d13C_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_option = 2
+                   slope_2 = lm(d13C_known~d13C_processing)$coefficients[2], # Calculates the slope for normalization_option = 2
+                   intercept_2 = lm(d13C_known~d13C_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_option = 2
             mutate(i = ifelse(i==max(i),i-1,i)) %>% 
             mutate(slope_1 = ifelse(all(is.na(slope_1)),slope_2,slope_1),
                    intercept_1 = ifelse(all(is.na(intercept_1)),intercept_2,intercept_1))
@@ -709,7 +711,7 @@ normalization_function <- function(input,normalization_option,normalization_comp
         
         normalization_plot <- scale_normalization_1 %>% 
             ungroup() %>% 
-            select(row,dD_known,d13C_processing,i) %>% 
+            select(row,d13C_known,d13C_processing,i) %>% 
             full_join(scale_normalization_2,by = c("row", "i")) %>% 
             mutate(label_width = nchar(max(row))) %>% 
             group_by(i,normalization_method) %>% 
@@ -718,21 +720,21 @@ normalization_function <- function(input,normalization_option,normalization_comp
                    method_label = ifelse(normalization_method==2,"Full-Run Normalization",paste0("(Rows ",start_row," - ",end_row,") ","Bracketed Normalization")),
                    equation = paste0("y = ",round(slope[1],4)," * x + ",round(intercept[1],4)),
                    label = paste(method_label,equation,sep="\n")) %>% 
-            filter(!is.na(dD_known)) %>% 
-            ggplot(aes(x=d13C_processing, y=dD_known)) +
+            filter(!is.na(d13C_known)) %>% 
+            ggplot(aes(x=d13C_processing, y=d13C_known)) +
             geom_point() +
             geom_smooth(method="lm",se=F, formula = y~x) +
             facet_rep_wrap(~label) +
-            labs(x="Observed \u03B4D ( \u2030 )",
-                 y="Known \u03B4D ( \u2030 )",
+            labs(x="Observed \u03B4\u00b9\u00b3C ( \u2030 )",
+                 y="Known \u03B4\u00b9\u00b3C ( \u2030 )",
                  title="VSMOW-SLAP Scale Normalization Curve")
         
         output <- input %>% filter(comp != "Ref") %>% 
             full_join(scale_normalization_2,by = "row") %>% 
-            mutate(dD_prenormalization = d13C_processing,
-                   d13C_processing = dD_prenormalization * slope + intercept,
-                   dD_normalization = d13C_processing) %>% 
-            anti_join(scale_normalization_1,by = c("row", "id2", "comp", "class", "row_base", "std_mix", "dD_known"))
+            mutate(d13C_prenormalization = d13C_processing,
+                   d13C_processing = d13C_prenormalization * slope + intercept,
+                   d13C_normalization = d13C_processing) %>% 
+            anti_join(scale_normalization_1,by = c("row", "id2", "comp", "class", "row_base", "std_mix", "d13C_known"))
         
         list("output" = output,
              "scale_normalization_1" = scale_normalization_1,
@@ -740,9 +742,9 @@ normalization_function <- function(input,normalization_option,normalization_comp
              "normalization_plot" = normalization_plot)
     } else {
         output <- input %>% filter(comp != "Ref") %>% 
-            mutate(dD_prenormalization = d13C_processing,
-                   d13C_processing = dD_prenormalization,
-                   dD_normalization = d13C_processing)
+            mutate(d13C_prenormalization = d13C_processing,
+                   d13C_processing = d13C_prenormalization,
+                   d13C_normalization = d13C_processing)
         list("output" = output,
              "scale_normalization_1" = NULL,
              "scale_normalization_2" = NULL,
@@ -761,23 +763,23 @@ control_function <- function(input,normalization_comps,processing_order) {
             mutate(mix_comp_class = paste0(comp_class," (",id1,")")) %>% 
             filter(!(mix_comp_class %in% normalization_comps)) %>% 
             ungroup() %>% 
-            select(mix_comp_class,comp_class,conc,std_mix,d13C_processing,dD_known) %>% 
-            filter(!is.na(dD_known)) %>% 
-            mutate(ungrouped_full_rmse = round(sqrt(sum((dD_known - d13C_processing)^2)/(n()-1)),1)) %>% 
+            select(mix_comp_class,comp_class,conc,std_mix,d13C_processing,d13C_known) %>% 
+            filter(!is.na(d13C_known)) %>% 
+            mutate(ungrouped_full_rmse = round(sqrt(sum((d13C_known - d13C_processing)^2)/(n()-1)),2)) %>% 
             group_by(conc) %>% 
-            mutate(conc_grouped_rmse = round(sqrt(sum((dD_known - d13C_processing)^2)/(n()-1)),1)) %>% 
+            mutate(conc_grouped_rmse = round(sqrt(sum((d13C_known - d13C_processing)^2)/(n()-1)),2)) %>% 
             group_by(std_mix,conc) %>% 
-            mutate(std_mix_rmse = round(sqrt(sum((dD_known - d13C_processing)^2)/(n()-1)),1)) %>% 
+            mutate(std_mix_rmse = round(sqrt(sum((d13C_known - d13C_processing)^2)/(n()-1)),2)) %>% 
             group_by(comp_class,conc,std_mix,ungrouped_full_rmse,conc_grouped_rmse,std_mix_rmse) %>%
-            summarize(observed_value = round(mean(d13C_processing),1),
-                      observed_sd = round(sd(d13C_processing),1),
+            summarize(observed_value = round(mean(d13C_processing),2),
+                      observed_sd = round(sd(d13C_processing),2),
                       observed_n = n(),
-                      accepted_value = round(unique(dD_known)[1],1),
-                      root_mean_square_error = round(sqrt(sum((dD_known - d13C_processing)^2)/(n()-1)),1),
-                      mean_signed_difference = round(sum(dD_known-d13C_processing)/(n()-1),1)) %>% 
+                      accepted_value = round(unique(d13C_known)[1],2),
+                      root_mean_square_error = round(sqrt(sum((d13C_known - d13C_processing)^2)/(n()-1)),2),
+                      mean_signed_difference = round(sum(d13C_known-d13C_processing)/(n()-1),2)) %>% 
             arrange(std_mix,conc,comp_class)
         
-        proc_table <- data.frame(levels = c("dD_raw","dD_drift","dD_size","dD_normalization"),
+        proc_table <- data.frame(levels = c("d13C_raw","d13C_drift","d13C_size","d13C_normalization"),
                                  proc_label = c("Raw","Drift","Size","Scale Normalization")) %>% 
             full_join(data.frame(proc_label = c("Raw",processing_order),
                                  order = 1:4),by = "proc_label") %>% 
@@ -785,24 +787,24 @@ control_function <- function(input,normalization_comps,processing_order) {
             arrange(order)
         
         correction_visual_plot <- input %>% 
-            filter(!is.na(dD_known)) %>% 
+            filter(!is.na(d13C_known)) %>% 
             filter(!grepl("derivatization",id2)) %>% 
-            gather(dD_type,value,dD_raw,dD_drift,dD_size,dD_normalization) %>% 
-            mutate(dD_type = factor(dD_type,levels=proc_table$levels,ordered=T,
+            gather(d13C_type,value,d13C_raw,d13C_drift,d13C_size,d13C_normalization) %>% 
+            mutate(d13C_type = factor(d13C_type,levels=proc_table$levels,ordered=T,
                                     labels=proc_table$label)) %>% 
-            group_by(dD_type,dD_known,dD_known_sd,std_mix,conc,comp) %>% 
-            summarize(dD_mean = mean(value),
-                      dD_sd = sd(value)) %>% 
+            group_by(d13C_type,d13C_known,d13C_known_sd,std_mix,conc,comp) %>% 
+            summarize(d13C_mean = mean(value),
+                      d13C_sd = sd(value)) %>% 
             mutate(std_conc = paste(std_mix,conc))
         
-        corrections_plot <- ggplot(correction_visual_plot, aes(x=dD_mean,y=dD_known)) +
-            geom_errorbar(aes(ymin = dD_known - dD_known_sd, ymax = dD_known + dD_known_sd),width=0) +
-            geom_errorbarh(aes(xmin = dD_mean - dD_sd,xmax = dD_mean + dD_sd),height=0) +
+        corrections_plot <- ggplot(correction_visual_plot, aes(x=d13C_mean,y=d13C_known)) +
+            geom_errorbar(aes(ymin = d13C_known - d13C_known_sd, ymax = d13C_known + d13C_known_sd),width=0) +
+            geom_errorbarh(aes(xmin = d13C_mean - d13C_sd,xmax = d13C_mean + d13C_sd),height=0) +
             geom_smooth(method="lm",se=F,color="black",size=0.25, formula = y~x) +
             geom_point(aes(color=std_conc),size=2.5) +
-            facet_rep_wrap(~dD_type) + 
-            labs(x = "\u03B4D Observed ( \u2030 )",
-                 y = "\u03B4D Known ( \u2030 )",
+            facet_rep_wrap(~d13C_type) + 
+            labs(x = "\u03B4\u00b9\u00b3C Observed ( \u2030 )",
+                 y = "\u03B4\u00b9\u00b3C Known ( \u2030 )",
                  color = "Standard + Concentration")
         
         list("control_standards" = control_standards,
@@ -821,64 +823,64 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
     if(!is.null(input)){
         derivative_check <- input %>% filter(grepl("derivatization",id2))
         
-        derivatization_choice = ifelse(derivatization_option == "Template-defined derivative \u03B4D.","template",
-                                ifelse(derivatization_option == "Derivatization standard in sequence \u03B4D.","inrun",
-                                ifelse(derivatization_option == "Do not correct for derivative hydrogen.","disabled",
+        derivatization_choice = ifelse(derivatization_option == "Template-defined derivative \u03B4\u00B9\u00B3C.","template",
+                                ifelse(derivatization_option == "Derivatization standard in sequence \u03B4\u00B9\u00B3C.","inrun",
+                                ifelse(derivatization_option == "Do not correct for derivative carbon","disabled",
                                        "derivatization_option in derivatization_correction broken! Check that the radioButton choices still match!")))
         
         if(length(derivative_check$id2) > 0) {
             inrun <- derivative_check %>% left_join(derivatization_table[,1:4],by = c("comp","class")) %>% 
                 ungroup() %>% 
-                mutate(total_hydrogen_count = bound_hydrogen_count + derivative_hydrogen_count,
-                       derivative_dD_inrun = (total_hydrogen_count*d13C_processing - bound_hydrogen_count*dD_known) / derivative_hydrogen_count,
-                       error_counts = ifelse(anyNA(total_hydrogen_count),"[ No match found for derivatization standard in Derivatization Table sheet! ]",""),
-                       error_known = ifelse(anyNA(dD_known),"[ No match found for derivatization standard in Standards sheet! ]",""),
-                       error_known_sd = ifelse(anyNA(dD_known_sd) & is.null(error_known),"[ Missing uncertainty of known value for derivatization standard in Standards sheet!",""),
+                mutate(total_carbon_count = bound_carbon_count + derivative_carbon_count,
+                       derivative_d13C_inrun = (total_carbon_count*d13C_processing - bound_carbon_count*d13C_known) / derivative_carbon_count,
+                       error_counts = ifelse(anyNA(total_carbon_count),"[ No match found for derivatization standard in Derivatization Table sheet! ]",""),
+                       error_known = ifelse(anyNA(d13C_known),"[ No match found for derivatization standard in Standards sheet! ]",""),
+                       error_known_sd = ifelse(anyNA(d13C_known_sd) & is.null(error_known),"[ Missing uncertainty of known value for derivatization standard in Standards sheet!",""),
                        errors = paste0(error_counts,error_known,error_known_sd),
                        derivatization_filter = "inrun") %>% 
                 group_by(derivatization_filter,errors) %>% 
-                summarize(derivative_dD_inrun_mean = round(mean(derivative_dD_inrun),1),
-                          derivative_dD_inrun_precision = sd(derivative_dD_inrun),
-                          derivative_dD_inrun_knownerror = mean(dD_known_sd),
-                          derivative_dD_inrun_uncertainty = round(sqrt(derivative_dD_inrun_precision^2 + derivative_dD_inrun_knownerror^2),1)) %>% 
-                rename(derivative_dD = derivative_dD_inrun_mean,
-                       derivative_dD_uncertainty = derivative_dD_inrun_uncertainty) %>% 
-                select(derivative_dD,derivative_dD_uncertainty,derivatization_filter,errors)
+                summarize(derivative_d13C_inrun_mean = round(mean(derivative_d13C_inrun),1),
+                          derivative_d13C_inrun_precision = sd(derivative_d13C_inrun),
+                          derivative_d13C_inrun_knownerror = mean(d13C_known_sd),
+                          derivative_d13C_inrun_uncertainty = round(sqrt(derivative_d13C_inrun_precision^2 + derivative_d13C_inrun_knownerror^2),1)) %>% 
+                rename(derivative_d13C = derivative_d13C_inrun_mean,
+                       derivative_d13C_uncertainty = derivative_d13C_inrun_uncertainty) %>% 
+                select(derivative_d13C,derivative_d13C_uncertainty,derivatization_filter,errors)
         } else {
-            inrun <- data.frame(derivative_dD = NA,
-                                derivative_dD_uncertainty = NA,
+            inrun <- data.frame(derivative_d13C = NA,
+                                derivative_d13C_uncertainty = NA,
                                 derivatization_filter = "inrun",
                                 errors = "[ No derivatization standards identified in Identifier 2! ]")
         }
         
         derivatives_to_use <- derivatization_table[1,c(5:6)] %>% 
             mutate(derivatization_filter = "template",
-                   derivative_dD_error = ifelse(is.na(derivative_dD),"[ Missing derivative_dD in Derivatization sheet! ]",""),
-                   derivative_dD_uncertainty_error = ifelse(is.na(derivative_dD_uncertainty),"[ Missing derivative_dD_uncertainty in Derivatization sheet! ]",""),
-                   errors = paste0(derivative_dD_error,derivative_dD_uncertainty_error)) %>% 
-            select(-c(derivative_dD_error,derivative_dD_uncertainty_error)) %>% 
+                   derivative_d13C_error = ifelse(is.na(derivative_d13C),"[ Missing derivative_d13C in Derivatization sheet! ]",""),
+                   derivative_d13C_uncertainty_error = ifelse(is.na(derivative_d13C_uncertainty),"[ Missing derivative_d13C_uncertainty in Derivatization sheet! ]",""),
+                   errors = paste0(derivative_d13C_error,derivative_d13C_uncertainty_error)) %>% 
+            select(-c(derivative_d13C_error,derivative_d13C_uncertainty_error)) %>% 
             rbind(inrun) %>% 
-            rbind(data.frame(derivative_dD = NA, derivative_dD_uncertainty = NA, derivatization_filter = "disabled",errors = "")) %>% 
+            rbind(data.frame(derivative_d13C = NA, derivative_d13C_uncertainty = NA, derivatization_filter = "disabled",errors = "")) %>% 
             filter(derivatization_filter %in% derivatization_choice) %>% 
             mutate(derivatization_filter = derivatization_option)
         
         sample_results <- left_join(input,derivatization_table[,1:4],by = c("comp", "class")) %>% 
             group_by(row,comp,class) %>% 
-            mutate(derivative_dD = as.numeric(derivatives_to_use$derivative_dD),
-                   derivative_dD_uncertainty = as.numeric(derivatives_to_use$derivative_dD_uncertainty)) %>% 
-            mutate(bound_hydrogen_count = ifelse(is.na(bound_hydrogen_count),1,bound_hydrogen_count),
-                   derivative_hydrogen_count = ifelse(is.na(derivative_hydrogen_count),0,derivative_hydrogen_count),
-                   total_hydrogen_count = bound_hydrogen_count + derivative_hydrogen_count,
-                   derivative_dD_uncertainty = ifelse(derivative_hydrogen_count == 0,0,derivative_dD_uncertainty),
-                   final_dD = (total_hydrogen_count*d13C_processing - derivative_hydrogen_count*derivative_dD)/bound_hydrogen_count,
-                   final_dD = ifelse(derivatization_choice == "disabled",d13C_processing,final_dD),
-                   final_dD = ifelse(id2 == "sample",final_dD,d13C_processing))
+            mutate(derivative_d13C = as.numeric(derivatives_to_use$derivative_d13C),
+                   derivative_d13C_uncertainty = as.numeric(derivatives_to_use$derivative_d13C_uncertainty)) %>% 
+            mutate(bound_carbon_count = ifelse(is.na(bound_carbon_count),1,bound_carbon_count),
+                   derivative_carbon_count = ifelse(is.na(derivative_carbon_count),0,derivative_carbon_count),
+                   total_carbon_count = bound_carbon_count + derivative_carbon_count,
+                   derivative_d13C_uncertainty = ifelse(derivative_carbon_count == 0,0,derivative_d13C_uncertainty),
+                   final_d13C = (total_carbon_count*d13C_processing - derivative_carbon_count*derivative_d13C)/bound_carbon_count,
+                   final_d13C = ifelse(derivatization_choice == "disabled",d13C_processing,final_d13C),
+                   final_d13C = ifelse(id2 == "sample",final_d13C,d13C_processing))
         
         list("output" = sample_results,
-             "derivative_dD_selected" = derivatives_to_use)
+             "derivative_d13C_selected" = derivatives_to_use)
     } else {
         list("output" = NULL,
-             "derivative_dD_selected" = NULL)
+             "derivative_d13C_selected" = NULL)
     }
 }
 
@@ -917,8 +919,8 @@ final_sample_function <- function(final_data,
     
         sample_report = final_data %>% 
             filter(id2 == "sample") %>% ungroup() %>% 
-            mutate(dD_calibrated = round(dD_normalization,1)) %>% 
-            select(row,id1,rt,ampl,area,comp_class,size_group,dD_raw,dD_calibrated)
+            mutate(d13C_calibrated = round(d13C_normalization,1)) %>% 
+            select(row,id1,rt,ampl,area,comp_class,size_group,d13C_raw,d13C_calibrated)
         
         standard_report = control_standards %>% 
             select(std_mix,conc,comp_class,ungrouped_full_rmse:mean_signed_difference)
@@ -980,7 +982,7 @@ final_sample_function <- function(final_data,
 {
     ui <- dashboardPage(
         skin = "green",
-        dashboardHeader(title = "GC-IRMS \u03B4D"),
+        dashboardHeader(title = "GC-IRMS \u03B4\u00B9\u00B3"),
         dashboardSidebar(
             sidebarMenu(
                 menuItem("Ingest Data",tabName = "ingest_tab",icon = icon("table")),
@@ -1001,7 +1003,7 @@ final_sample_function <- function(final_data,
             tabItems(
                 tabItem(tabName = "ingest_tab",
                         fluidPage(
-                            box(title = h1("Shiny Post-Processor: Compound Specific \u03B4D via GC-HTC-IRMS", strong("(expand for instructions!)"),hr()),
+                            box(title = h1("Shiny Post-Processor: Compound Specific \u03B4\u00b9\u00b3C via GC-C-IRMS", strong("(expand for instructions!)"),hr()),
                                 solidHeader=T,
                                 width=12,
                                 collapsible = T,
@@ -1147,7 +1149,7 @@ final_sample_function <- function(final_data,
                                               value = NA,
                                               step = 10),
                                     radioButtons("size_model_type",
-                                                 label = "Select the size model to apply. Log-transformations are applied to the independent variable only. (dD) Composition-scaled 
+                                                 label = "Select the size model to apply. Log-transformations are applied to the independent variable only. (d13C) Composition-scaled 
                                                  model requires that size standards have a wide range of isotopic compositions. First, rough estimates of isotopic compositions are made 
                                                  for each size compound by performing an ungrouped, log-transformed linear model identical to the second option in this list. Second, 
                                                  individual log-transformed linear models are generated for each compound. Individual model slopes (and then intercepts) are regressed via
@@ -1155,7 +1157,7 @@ final_sample_function <- function(final_data,
                                                  and the isotopic composition of the compound that we are accounting for. These slope/intercept relationships are used in conjunction with the
                                                  roughly corrected isotopic compositions to generate slopes/intercepts to ultimately use for size correction. Finally, the size effect for each
                                                  injection is predicted from the log-transformed size variable using the 'composition-scaled' slopes and intercepts and subtracted from the original,
-                                                 uncorrected dD.",
+                                                 uncorrected d13C.",
                                                  choices = c("Linear model",
                                                              "Log-Transformed linear model",
                                                              "Log-transformed, composition-scaled linear model")),
@@ -1251,19 +1253,19 @@ final_sample_function <- function(final_data,
                             box(title = NULL,
                                 width = 3,
                                 radioButtons("derivatization_option",
-                                             label = "Select the desired source of the derivative hydrogen \u03B4D:",
-                                             choices = c("Template-defined derivative \u03B4D.",
-                                                         "Derivatization standard in sequence \u03B4D.",
-                                                         "Do not correct for derivative hydrogen."))),
+                                             label = "Select the desired source of the derivative carbon \u03B4\u00B9\u00B3:",
+                                             choices = c("Template-defined derivative \u03B4\u00B9\u00B3C.",
+                                                         "Derivatization standard in sequence \u03B4\u00B9\u00B3C.",
+                                                         "Do not correct for derivative carbon."))),
                             box(title = "Derivative Hydrogen Table",
                                 width = 9,
                                 collapsible = T,
                                 collapsed = T,
                                 DTOutput("derivatization_table"),
                                 style="height:250px; overflow-y: scroll;overflow-x: scroll"),
-                            box(title = "Selected Derivative \u03B4D Values",
+                            box(title = "Selected Derivative \u03B4\u00b9\u00b3C Values",
                                 width = 12,
-                                tableOutput("derivative_dD_selected")),
+                                tableOutput("derivative_d13C_selected")),
                             box(title = "Sample Derivatization Correction",
                                 width = 12,
                                 DTOutput("sample_derivatization_table"),
@@ -1314,12 +1316,12 @@ server <- function(input, output, session) {
                     tags$li("control (known standard to estimate accuracy)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
                     tags$li("drift (account for instrument drift)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
                     tags$li("size (peak size to isotope ratio correction)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
-                    tags$li("derivatization (calculate added hydrogen during derivatization)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
+                    tags$li("derivatization (calculate added carbon during derivatization)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;"),
                     tags$li("warm-up (discarded injections)",style = "list-style-position: inside;text-indent: -1em;padding-left: 1em;")
                     ),
                 p("Standards may serve multiple roles (i.e, drift and control) that should be separated by an underscore (i.e., drift_control) in Identifier 2.
                   If a standard is assigned both the standard and control role (i.e., standard_control), then the compounds selected for scale normalization will be
-                  excluded from use as control standards. Only sample and standard roles are required to be used. If you have pre-determined your derivative hydrogen, 
+                  excluded from use as control standards. Only sample and standard roles are required to be used. If you have pre-determined your derivative carbon, 
                   the known value can be entered in the Excel template file (see below)",
                   style = "padding-left:2em"),
                 p(strong("Preparation:")," (optional) This column is used to indicate the concentration ( ng/\u03BCL ) of a vial. This is only necessary if size correction is desired 
@@ -1353,8 +1355,8 @@ server <- function(input, output, session) {
                     tags$li(strong("Retention Times:")," (Optional) A list of compound names & classes and their GC retention times. If you use your software's built-in RT table and your compounds are
                       already identified in your IRMS export, then this is not needed.",
                             style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
-                    tags$li(strong("Derivatization:")," (Optional) A list of compound names & classes and their hydrogen atom counts. If you are running non-derivatized compounds (e.g., n-alkanes), then
-                      this table is not necessary. The known value of your derivative \u03B4D should be entered here with appropriate error. This may be left empty if you include a derivatization
+                    tags$li(strong("Derivatization:")," (Optional) A list of compound names & classes and their carbon atom counts. If you are running non-derivatized compounds (e.g., n-alkanes), then
+                      this table is not necessary. The known value of your derivative \u03B4\u00b9\u00b3C should be entered here with appropriate error. This may be left empty if you include a derivatization
                             standard with the sequence.",
                             style = "list-style-position: inside;text-indent: -20px;padding-left: 20px;"),
                     tags$li(strong("Initials:")," (Optional) The initial choices for each processing option. If you have a preferred method, then you may want to
@@ -1396,7 +1398,7 @@ server <- function(input, output, session) {
             {   data()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
                     filter(grepl("standard",id2)) %>%
                     mutate(mix_comp_class = paste0(comp_class," (",id1,")")) %>% 
-                    select(mix_comp_class,id1,comp_class,dD_known) %>% distinct()} else return(NULL)
+                    select(mix_comp_class,id1,comp_class,d13C_known) %>% distinct()} else return(NULL)
         })
         
         cal_comp_selected <- reactive({
@@ -1418,7 +1420,7 @@ server <- function(input, output, session) {
                 if(anyNA(ingest()$initials$normalization_comps)) {
                     cal_comp_choices() %>% 
                         filter(id1 == default_standard_mix) %>% 
-                        filter(dD_known == max(dD_known) | dD_known == min(dD_known)) 
+                        filter(d13C_known == max(d13C_known) | d13C_known == min(d13C_known)) 
                 } else
                     if(!anyNA(ingest()$initials$normalization_comps)) {
                         data.frame(id1 = ingest()$initials$normalization_mix[1],
@@ -1656,7 +1658,7 @@ server <- function(input, output, session) {
         })
         
         output$derivatization_table <- renderDT(ingest()$derivatization_table[,1:4],options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
-        output$derivative_dD_selected <- renderTable(derivatization_results()$derivative_dD_selected)
+        output$derivative_d13C_selected <- renderTable(derivatization_results()$derivative_d13C_selected)
         output$sample_derivatization_table <- renderDT(derivatization_results()$output,options=list('lengthMenu'=JS('[[10,25,50,-1],[10,25,50,"All"]]'),searching=FALSE),class='white-space:nowrap')
         
    }
