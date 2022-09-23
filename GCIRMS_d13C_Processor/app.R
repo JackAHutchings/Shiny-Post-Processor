@@ -465,12 +465,15 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                      y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
                      x=size_label)
             
-            size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
-                geom_point(aes(color=mix_comp_class)) +
-                geom_smooth(method="lm",se=F, formula = y~x) +
-                labs(title="Corrected plot of size effect standards.",
-                     y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                     x=size_label)
+            size_corrected_grouped_plot <- size_effect_raw %>% 
+              rowwise() %>% 
+              mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+              ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
+              geom_point(aes(color=mix_comp_class)) +
+              geom_smooth(method="lm",se=F, formula = y~x) +
+              labs(title="Corrected plot of size effect standards.",
+                   y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
+                   x=size_label)
             
             if(size_model_option != 3){
             
