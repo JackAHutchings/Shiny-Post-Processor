@@ -18,9 +18,9 @@ library(plotly)
 
 # testing
 {
-  # setwd("C:/github/Shiny-Post-Processor/GCIRMS_d13C_Processor")
-  # raw_isodat_file = "Example Export.csv"
-  # gcirms_template_file = "GCIRMS C Template.xlsx"
+  # setwd("C:/Box/Konecky Lab/Data/Thermo GC-IRMS/Results/2022/03_14 Carana Alkanes for C Batch 3")
+  # raw_isodat_file = "2022-09-23(C export).csv"
+  # gcirms_template_file = "GCIRMS C Template 2022-09-23.xlsx"
   # compound_option = "Assigned by IRMS export in Component/comp column."
   # first_correction = "Drift"
   # second_correction = "Size"
@@ -38,8 +38,8 @@ library(plotly)
   # largest_acceptable_peak = NA
   # smallest_acceptable_peak = NA
   # normalization_option = "Linear interpolation between adjacent normalization standards (use this if drift-correction is untenable)"
-  # normalization_mix = "ACAL"
-  # normalization_comps = c("C23 Alkane (ACAL)", "C25 Alkane (ACAL)")
+  # normalization_mix = "CAL"
+  # normalization_comps = NA
   # derivatization_option = "Template-defined derivative \u03B4\u00b9\u00b3C."
 }
 
@@ -735,9 +735,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
         }
 }
 
-normalization_function <- function(input,normalization_option,normalization_comps) {
+normalization_function <- function(input,normalization_option,normalization_mix,normalization_comps) {
     
-    scale_check <- input %>% filter(grepl("standard",id2))
+    scale_check <- input %>% filter(grepl("standard",id2) | grepl(normalization_mix,id1))
     
     # normalization_comps = paste(normalization_comps,"(ACAL)")
     
@@ -1483,7 +1483,7 @@ server <- function(input, output, session) {
         cal_comp_choices <- reactive({
             if(!is.null(ingest()$output))
             {   data()$data %>% filter(comp != "Ref") %>%  # Removes the reference peaks.
-                    filter(grepl("standard",id2)) %>%
+                    filter(grepl("standard",id2) | grepl(paste0("^",ingest()$initials$normalization_mix[1],"$"),id1)) %>%
                     mutate(mix_comp_class = paste0(comp_class," (",id1,")")) %>% 
                     select(mix_comp_class,id1,comp_class,d13C_known) %>% distinct()} else return(NULL)
         })
@@ -1603,7 +1603,7 @@ server <- function(input, output, session) {
                                              input$size_model_type)}}
             if(input$first_correction == "Scale Normalization")
                 {output = if(is.null(ingest()$output)){NULL}
-                          else{normalization_function(data()$data,input$normalization_option,input$normalization_comps)}}
+                          else{normalization_function(data()$data,input$normalization_option,ingest()$initials$normalization_mix[1],input$normalization_comps)}}
             output
         })
         second_correction_data <- reactive({
@@ -1618,7 +1618,7 @@ server <- function(input, output, session) {
                                              input$size_model_type)}}
             if(input$second_correction == "Scale Normalization")
                 {output = if(is.null(first_correction_data()$output)){NULL}
-                          else{normalization_function(first_correction_data()$output,input$normalization_option,input$normalization_comps)}}
+                          else{normalization_function(first_correction_data()$output,input$normalization_option,ingest()$initials$normalization_mix[1],input$normalization_comps)}}
             output
         })
         third_correction_data <- reactive({
@@ -1633,7 +1633,7 @@ server <- function(input, output, session) {
                                              input$size_model_type)}}
             if(input$third_correction == "Scale Normalization")
                 {output = if(is.null(second_correction_data()$output)){NULL}
-                          else{normalization_function(second_correction_data()$output,input$normalization_option,input$normalization_comps)}}
+                          else{normalization_function(second_correction_data()$output,input$normalization_option,ingest()$initials$normalization_mix[1],input$normalization_comps)}}
             output
         })
 
