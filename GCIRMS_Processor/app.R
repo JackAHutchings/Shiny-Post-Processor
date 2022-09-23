@@ -392,7 +392,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     group_by(mix_comp_class) %>% 
                     mutate(dD_zeroed = dD_processing - min(dD_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
                     rowwise() %>%
-                    mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>%
+                    mutate(value = log(value)) %>%
                     group_by(size_group,mix_comp_class) %>% 
                     mutate(comp_specific_slope = lm(dD_zeroed~value)$coefficients[2],
                            comp_specific_intercept = lm(dD_zeroed~value)$coefficients[1]) %>% 
@@ -409,8 +409,6 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                            intercept_vs_dD_intercept = lm(comp_specific_intercept~stage1_correction)$coefficients[1]) %>% 
                     mutate(size_slope = slope_vs_dD_slope * stage1_correction + slope_vs_dD_intercept,
                            size_intercept = intercept_vs_dD_slope * stage1_correction + intercept_vs_dD_intercept) %>% 
-                    mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
-                           size_intercept = lm(dD_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
                     mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
                            size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
                     mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
@@ -460,12 +458,15 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                      y="Size Corrected \u03B4D ( \u2030 )",
                      x=size_label)
             
-            size_corrected_grouped_plot <- size_effect_raw %>% ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
-                geom_point(aes(color=mix_comp_class)) +
-                geom_smooth(method="lm",se=F, formula = y~x) +
-                labs(title="Corrected plot of size effect standards.",
-                     y="Size Corrected \u03B4D ( \u2030 )",
-                     x=size_label)
+            size_corrected_grouped_plot <- size_effect_raw %>% 
+              rowwise() %>% 
+              mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+              ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
+              geom_point(aes(color=mix_comp_class)) +
+              geom_smooth(method="lm",se=F, formula = y~x) +
+              labs(title="Corrected plot of size effect standards.",
+                   y="Size Corrected \u03B4D ( \u2030 )",
+                   x=size_label)
             
             if(size_model_option != 3){
             
