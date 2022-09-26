@@ -18,8 +18,8 @@ library(plotly)
 
 # testing
 {
-  # setwd("C:/Box/Konecky Lab/Data/Thermo GC-IRMS/Results/2022/03_14 Carana Alkanes for C Batch 3")
-  # raw_isodat_file = "2022-09-23(C export).csv"
+  # setwd("C:/Box/Konecky Lab/Data/Thermo GC-IRMS/Results/2022/09_21 Imphal Basin FAMEs for C Batch 2")
+  # raw_isodat_file = "(C export).csv"
   # gcirms_template_file = "GCIRMS C Template 2022-09-23.xlsx"
   # compound_option = "Assigned by IRMS export in Component/comp column."
   # first_correction = "Drift"
@@ -143,7 +143,7 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         select(-compound_option) %>% 
         mutate(id1 = as.character(id1),
                comp = as.character(comp)) %>% 
-        mutate(std_mix = ifelse(id2 == "sample" | id2 == "derivatization",NA,id1)) %>% #id1 should be used to identify the standard mix names.
+        mutate(std_mix = ifelse(id2 == "sample",NA,id1)) %>% #id1 should be used to identify the standard mix names.
         separate(comp,c("comp","class"),sep=" ",fill="right") %>% 
         left_join(standard_info,by = c("std_mix", "comp", "class")) %>%  # Join with standard_info
         mutate(relative_concentration = ifelse(is.na(relative_concentration),1,relative_concentration)) %>% 
@@ -383,47 +383,6 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     mutate(size_upper = max(value),
                            size_lower = min(value),
                            size_group = ifelse(is.na(size_group),"Normal",size_group))
-                
-                size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_zeroed)) +
-                  geom_point() +
-                  facet_wrap(~mix_comp_class,scales="free",nrow=1) +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
-                       x=size_label,
-                       y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )")
-                
-                size_raw_grouped_plot <- size_effect_raw %>% 
-                  rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_zeroed,color=size_group)) +
-                  geom_point() +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
-                       y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                       x=size_label)
-                
-                size_corrected_bycomp_plot <- size_effect_raw %>% 
-                  rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_processing)) +
-                  geom_point() +
-                  facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
-                       y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                       x=size_label)
-                
-                size_corrected_grouped_plot <- size_effect_raw %>% 
-                  rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
-                  geom_point(aes(color=mix_comp_class)) +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Corrected plot of size effect standards.",
-                       y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                       x=size_label)
                 }
             
             if(size_model_option == 3) {
@@ -470,90 +429,49 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     mutate(size_upper = max(value),
                            size_lower = min(value),
                            size_group = ifelse(is.na(size_group),"Normal",size_group))
-                
-                size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_zeroed)) +
-                  geom_point() +
-                  facet_wrap(~mix_comp_class,scales="free",nrow=1) +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
-                       x=size_label,
-                       y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )")
-                
-                size_raw_grouped_plot <- size_effect_raw %>% 
-                  rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_zeroed,color=size_group)) +
-                  geom_point() +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
-                       y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                       x=size_label)
-                
-                size_corrected_bycomp_plot <- size_effect_raw %>% 
-                  rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_processing)) +
-                  geom_point() +
-                  facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
-                       y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                       x=size_label)
-                
-                size_corrected_grouped_plot <- size_effect_raw %>% 
-                  rowwise() %>% 
-                  mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-                  ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
-                  geom_point(aes(color=mix_comp_class)) +
-                  geom_smooth(method="lm",se=F, formula = y~x) +
-                  labs(title="Corrected plot of size effect standards.",
-                       y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                       x=size_label)
             }
             
             
-            # size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
-            #     mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-            #     ggplot(aes(x=value,y=d13C_zeroed)) +
-            #     geom_point() +
-            #     facet_wrap(~mix_comp_class,scales="free",nrow=1) +
-            #     geom_smooth(method="lm",se=F, formula = y~x) +
-            #     labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
-            #          x=size_label,
-            #          y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )")
-            # 
-            # size_raw_grouped_plot <- size_effect_raw %>% 
-            #     rowwise() %>% 
-            #     mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-            #     ggplot(aes(x=value,y=d13C_zeroed,color=size_group)) +
-            #     geom_point() +
-            #     geom_smooth(method="lm",se=F, formula = y~x) +
-            #     labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
-            #          y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
-            #          x=size_label)
-            # 
-            # size_corrected_bycomp_plot <- size_effect_raw %>% 
-            #     rowwise() %>% 
-            #     mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-            #     ggplot(aes(x=value,y=d13C_processing)) +
-            #     geom_point() +
-            #     facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
-            #     geom_smooth(method="lm",se=F, formula = y~x) +
-            #     labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
-            #          y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-            #          x=size_label)
-            # 
-            # size_corrected_grouped_plot <- size_effect_raw %>% 
-            #   rowwise() %>% 
-            #   mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
-            #   ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
-            #   geom_point(aes(color=mix_comp_class)) +
-            #   geom_smooth(method="lm",se=F, formula = y~x) +
-            #   labs(title="Corrected plot of size effect standards.",
-            #        y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-            #        x=size_label)
+          size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
+            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+            ggplot(aes(x=value,y=d13C_zeroed)) +
+            geom_point() +
+            facet_wrap(~mix_comp_class,scales="free",nrow=1) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
+            labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
+                 x=size_label,
+                 y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )")
+          
+          size_raw_grouped_plot <- size_effect_raw %>% 
+            rowwise() %>% 
+            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+            ggplot(aes(x=value,y=d13C_zeroed,color=size_group)) +
+            geom_point() +
+            geom_smooth(method="lm",se=F, formula = y~x) +
+            labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
+                 y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
+                 x=size_label)
+          
+          size_corrected_bycomp_plot <- size_effect_raw %>% 
+            rowwise() %>% 
+            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+            ggplot(aes(x=value,y=d13C_processing)) +
+            geom_point() +
+            facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
+            labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
+                 y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
+                 x=size_label)
+          
+          size_corrected_grouped_plot <- size_effect_raw %>% 
+            rowwise() %>% 
+            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+            ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
+            geom_point(aes(color=mix_comp_class)) +
+            geom_smooth(method="lm",se=F, formula = y~x) +
+            labs(title="Corrected plot of size effect standards.",
+                 y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
+                 x=size_label)
             
             if(size_model_option != 3){
             
@@ -739,7 +657,7 @@ normalization_function <- function(input,normalization_option,normalization_mix,
     
     scale_check <- input %>% filter(grepl("standard",id2) | grepl(normalization_mix,id1))
     
-    # normalization_comps = paste(normalization_comps,"(ACAL)")
+    # normalization_comps = paste(c("C20 FAME","C31 Alkane"),"(CAL)")
     
     if(length(scale_check$id2) > 0){
         normalization_option = ifelse(grepl("Linear interpolation between adjacent normalization standards",normalization_option),1,2)
@@ -922,10 +840,10 @@ derivatization_correction <- function(input,derivatization_table,derivatization_
                        errors = paste0(error_counts,error_known,error_known_sd),
                        derivatization_filter = "inrun") %>% 
                 group_by(derivatization_filter,errors) %>% 
-                summarize(derivative_d13C_inrun_mean = round(mean(derivative_d13C_inrun),1),
+                summarize(derivative_d13C_inrun_mean = round(mean(derivative_d13C_inrun),2),
                           derivative_d13C_inrun_precision = sd(derivative_d13C_inrun),
                           derivative_d13C_inrun_knownerror = mean(d13C_known_sd),
-                          derivative_d13C_inrun_uncertainty = round(sqrt(derivative_d13C_inrun_precision^2 + derivative_d13C_inrun_knownerror^2),1)) %>% 
+                          derivative_d13C_inrun_uncertainty = round(sqrt(derivative_d13C_inrun_precision^2 + derivative_d13C_inrun_knownerror^2),2)) %>% 
                 rename(derivative_d13C = derivative_d13C_inrun_mean,
                        derivative_d13C_uncertainty = derivative_d13C_inrun_uncertainty) %>% 
                 select(derivative_d13C,derivative_d13C_uncertainty,derivatization_filter,errors)

@@ -140,7 +140,7 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         select(-compound_option) %>% 
         mutate(id1 = as.character(id1),
                comp = as.character(comp)) %>% 
-        mutate(std_mix = ifelse(id2 == "sample" | id2 == "derivatization",NA,id1)) %>% #id1 should be used to identify the standard mix names.
+        mutate(std_mix = ifelse(id2 == "sample",NA,id1)) %>% #id1 should be used to identify the standard mix names.
         separate(comp,c("comp","class"),sep=" ",fill="right") %>% 
         left_join(standard_info,by = c("std_mix", "comp", "class")) %>%  # Join with standard_info
         mutate(relative_concentration = ifelse(is.na(relative_concentration),1,relative_concentration)) %>% 
