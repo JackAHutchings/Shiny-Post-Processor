@@ -748,18 +748,24 @@ normalization_function <- function(input,normalization_option,normalization_comp
     }
 }
 
-control_function <- function(input,normalization_comps,processing_order) {
-    control_check <- input %>% filter(grepl("control",id2))
+control_function <- function(input,normalization_comps,processing_order,size_for_control) {
+    
+  control_regexpr <- ifelse(size_for_control == "Include Size Standards in Controls","control|size","control")
+  
+  control_check <- input %>% filter(grepl(control_regexpr,id2))
     
     # processing_order = c(first_correction,second_correction,third_correction)
     
     if(length(control_check$id2) > 0) {
         control_standards <- input %>% 
-            filter(grepl("control",id2)) %>% 
+            filter(grepl(control_regexpr,id2)) %>% 
             mutate(mix_comp_class = paste0(comp_class," (",id1,")")) %>% 
             filter(!(mix_comp_class %in% normalization_comps)) %>% 
             ungroup() %>% 
             select(mix_comp_class,comp_class,conc,std_mix,dD_processing,dD_known) %>% 
+            mutate(conc = ifelse(conc < 10,"< 10",
+                                 ifelse(conc >= 10 & conc <= 15,"10-15",
+                                        ifelse(conc >=15,"> 15",NA)))) %>% 
             filter(!is.na(dD_known)) %>% 
             mutate(ungrouped_full_rmse = round(sqrt(sum((dD_known - dD_processing)^2)/(n()-1)),1)) %>% 
             group_by(conc) %>% 
@@ -1236,6 +1242,13 @@ final_sample_function <- function(final_data,
                 ),
                 tabItem(tabName = "control_tab",
                         fluidPage(
+                          box(title = NULL,
+                              width = 12,
+                              radioButtons("size_for_control",
+                                           label = "Select whether or not to include the size standards with the control standards:",
+                                           choices = c("Include Size Standards in Controls",
+                                                       "Exclude Size Standards from Controls"),
+                                           inline = T)),
                             box(title = NULL,
                                 width = 12,
                                 DTOutput("control_standards"),
@@ -1456,6 +1469,7 @@ server <- function(input, output, session) {
                                      choices = cal_comp_choices()$mix_comp_class,
                                      selected = cal_comp_selected()$mix_comp_class)
             updateCheckboxGroupInput(session,"accuracy_standards",choices = cal_mix_list()$mix_conc,selected = cal_mix_list()$mix_conc)
+            updateRadioButtons(session,"size_for_control",select = ingest()$initials$size_for_control[1])
             updateRadioButtons(session,"derivatization_option",selected = ingest()$initials$derivatization_option[1])
             },priority = 1)
         observe({updateSelectInput(session,"compound_option",selected = ingest()$initials$compound_option[1])})
@@ -1631,7 +1645,11 @@ server <- function(input, output, session) {
    }
    # QA Performance Tab
     {
-       control_standards <- reactive({if(!is.null(third_correction_data())){control_function(third_correction_data()$output,input$normalization_comps,processing_order())}
+       control_standards <- reactive({if(!is.null(third_correction_data())){
+         control_function(third_correction_data()$output,
+                          input$normalization_comps,
+                          processing_order(),
+                          input$size_for_control)}
            else return(NULL)})
 
        output$control_standards <- renderDT(control_standards()$control_standards,
