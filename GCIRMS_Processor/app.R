@@ -915,7 +915,7 @@ final_sample_function <- function(final_data,
     
         sample_report = final_data %>% 
             filter(id2 == "sample") %>% ungroup() %>% 
-            mutate(dD_calibrated = round(dD_normalization,1)) %>% 
+            mutate(dD_calibrated = round(final_dD,1)) %>% 
             select(row,id1,rt,ampl,area,comp_class,size_group,dD_raw,dD_calibrated)
         
         standard_report = control_standards %>% 
