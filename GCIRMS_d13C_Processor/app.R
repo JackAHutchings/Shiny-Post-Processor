@@ -18,29 +18,11 @@ library(plotly)
 
 # testing
 {
-  # setwd("C:/Box/Konecky Lab/Data/Thermo GC-IRMS/Results/2022/09_21 Imphal Basin FAMEs for C Batch 2")
+  # setwd("C:/Box/Konecky Lab/Data/Thermo GC-IRMS/Results/2023/08_04 VA Alkanes for C Batch D")
   # raw_isodat_file = "(C export).csv"
-  # gcirms_template_file = "GCIRMS C Template 2022-09-23.xlsx"
-  # compound_option = "Assigned by IRMS export in Component/comp column."
-  # first_correction = "Drift"
-  # second_correction = "Size"
-  # third_correction = "Scale Normalization"
-  # drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-  # drift_comp = "Mean drift of all compounds"
-  # size_option = "Peak Height (amplitude, mV)"
-  # size_model_type = "Log-transformed, composition-scaled linear model"
-  # size_cutoff = NA
-  # size_toosmall_peak_option = "Remove these from results."
-  # size_small_peak_option = "Remove observed size effect."
-  # size_normal_peak_option = "Remove observed size effect."
-  # size_large_peak_option = "Remove size effect with 'Normal' size effect function."
-  # acceptable_peak_units = "Peak Height (amplitude, mV)"
-  # largest_acceptable_peak = NA
-  # smallest_acceptable_peak = NA
-  # normalization_option = "Linear interpolation between adjacent normalization standards (use this if drift-correction is untenable)"
-  # normalization_mix = "CAL"
-  # normalization_comps = NA
-  # derivatization_option = "Template-defined derivative \u03B4\u00b9\u00b3C."
+  # gcirms_template_file = "GCIRMS C Template 2023-08-15.xlsx"
+  # initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
+  # list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
 }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -362,7 +344,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     mutate(size_group = ifelse(value < size_cutoff,"Small","Normal")) %>% 
                     mutate(mix_comp_class = paste(id1,comp,class,sep="_")) %>% 
                     group_by(mix_comp_class) %>% 
-                    mutate(d13C_zeroed = d13C_processing - min(d13C_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
+                    mutate(d13C_zeroed = d13C_processing - mean(d13C_processing)) %>% # Zero-centered. We are grouped by comp here so that each compound is zero centered by its mean.
                     rowwise() %>%
                     mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>%
                     group_by(size_group) %>% 
@@ -382,7 +364,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     ungroup() %>% 
                     mutate(size_upper = max(value),
                            size_lower = min(value),
-                           size_group = ifelse(is.na(size_group),"Normal",size_group))
+                           size_group = ifelse(is.na(size_group),"Normal",size_group)) %>% 
+                  mutate(raw_performance_rmse = round(sd(d13C_zeroed),2),
+                         model_performance_rmse = round(sd(d13C_drift_size_zeroed),2))
                 }
             
             if(size_model_option == 3) {
@@ -428,7 +412,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     ungroup() %>% 
                     mutate(size_upper = max(value),
                            size_lower = min(value),
-                           size_group = ifelse(is.na(size_group),"Normal",size_group))
+                           size_group = ifelse(is.na(size_group),"Normal",size_group)) %>% 
+                  mutate(raw_performance_rmse = round(sd(d13C_zeroed),2),
+                         model_performance_rmse = round(sd(d13C_drift_size_zeroed),2))
             }
             
             
@@ -449,6 +435,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             geom_point() +
             geom_smooth(method="lm",se=F, formula = y~x) +
             labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
+                 subtitle=paste("Impact of Size Effect (SD of Zeroed Isotope Values) = ",size_effect_raw$raw_performance_rmse[1]),
                  y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
                  x=size_label)
           
@@ -470,6 +457,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             geom_point(aes(color=mix_comp_class)) +
             geom_smooth(method="lm",se=F, formula = y~x) +
             labs(title="Corrected plot of size effect standards.",
+                 subtitle=paste("Impact of Size Effect (SD of Zeroed, Corrected Isotope Values) = ",size_effect_raw$model_performance_rmse[1]),
                  y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
                  x=size_label)
             
