@@ -18,26 +18,11 @@ library(plotly)
 
 #testing
 # {
-# setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/02_25 Chacacocha Posturea Batch 3")
-# raw_isodat_file = "Nadia_06_18_2021(H2 Export).csv"
-# gcirms_template_file = "GCIRMS Template.xlsx"
-# compound_option = "Assigned by IRMS export in Component/comp column."
-# drift_option = "No drift correction (use this when there is no apparent drift or if you use bracketed scale normalization)"
-# drift_comp = "Mean drift of all compounds"
-# size_option = "Peak Height (amplitude, mV)"
-# size_model_type = "Linear model"
-# size_cutoff = NA
-# size_normal_peak_option = "Remove size effect with 'Normal' size effect function."
-# size_small_peak_option = "Remove size effect with 'Small' size effect function."
-# size_toosmall_peak_option = "Remove these from results."
-# size_large_peak_option = "No size effect correction."
-# acceptable_peak_units = "Peak Height (amplitude, mV)"
-# largest_acceptable_peak = NA
-# smallest_acceptable_peak = NA
-# normalization_option = "Linear interpolation between adjacent normalization standards"
-# normalization_mix = "ACAL"
-# normalization_comps = c("C23 Alkane", "C31 Alkane")
-# derivatization_option = "Template-defined derivative \u03B4D."
+  # setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/02_25 Chacacocha Posturea Batch 3")
+  # raw_isodat_file = "Nadia_06_18_2021(H2 Export).csv"
+  # gcirms_template_file = "GCIRMS Template.xlsx"
+  # initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
+  # list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -377,7 +362,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     ungroup() %>% 
                     mutate(size_upper = max(value),
                            size_lower = min(value),
-                           size_group = ifelse(is.na(size_group),"Normal",size_group))
+                           size_group = ifelse(is.na(size_group),"Normal",size_group)) %>% 
+                    mutate(raw_performance_rmse = round(sd(dD_zeroed),2),
+                           model_performance_rmse = round(sd(dD_drift_size_zeroed),2))
                 }
             
             if(size_model_option == 3) {
@@ -423,7 +410,9 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     ungroup() %>% 
                     mutate(size_upper = max(value),
                            size_lower = min(value),
-                           size_group = ifelse(is.na(size_group),"Normal",size_group))
+                           size_group = ifelse(is.na(size_group),"Normal",size_group)) %>% 
+                    mutate(raw_performance_rmse = round(sd(dD_zeroed),2),
+                           model_performance_rmse = round(sd(dD_drift_size_zeroed),2))
             }
             
             
@@ -444,6 +433,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                 geom_point() +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
+                     subtitle=paste("Impact of Size Effect (SD of Zeroed Isotope Values) = ",size_effect_raw$raw_performance_rmse[1]," \u2030"),
                      y="Uncorrected \u03B4D ( \u2030 )",
                      x=size_label)
             
@@ -465,6 +455,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
               geom_point(aes(color=mix_comp_class)) +
               geom_smooth(method="lm",se=F, formula = y~x) +
               labs(title="Corrected plot of size effect standards.",
+                   subtitle=paste("Impact of Size Effect (SD of Zeroed, Corrected Isotope Values) = ",size_effect_raw$model_performance_rmse[1]," \u2030"),
                    y="Size Corrected \u03B4D ( \u2030 )",
                    x=size_label)
             
