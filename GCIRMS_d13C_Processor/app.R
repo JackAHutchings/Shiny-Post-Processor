@@ -491,7 +491,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     rowwise() %>% 
                     mutate(size_value = ifelse(size_model_option %in% c(2,3),log(size_value),size_value)) %>% 
                     mutate(d13C_presize = d13C_processing,
-                           d13C_processing = d13C_presize - (size_slope*size_value + size_intercept),
+                           d13C_processing = d13C_presize - (size_slope*size_value + size_intercept) * size_opt_out,
                            d13C_size = d13C_processing,
                            size_value = ifelse(size_model_option %in% c(2,3),exp(size_value),size_value)) %>% 
                     filter(!is.na(d13C_processing))
@@ -563,7 +563,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                            d13C_stage1_correction = d13C_presize - (general_slope * log(size_value) + general_intercept),
                            size_slope = slope_vs_d13C_slope * d13C_stage1_correction + slope_vs_d13C_intercept,
                            size_intercept = intercept_vs_d13C_slope * d13C_stage1_correction + intercept_vs_d13C_intercept,
-                           d13C_processing = d13C_presize - (size_slope*log(size_value) + size_intercept),
+                           d13C_processing = d13C_presize - (size_slope*log(size_value) + size_intercept) * size_opt_out,
                            d13C_size = d13C_processing) %>% 
                     select(-c(general_intercept:slope_vs_d13C_slope)) %>% 
                     filter(!is.na(d13C_processing))
