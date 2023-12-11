@@ -1,0 +1,14 @@
+name: GCIRMS_d13C_Processor
+title: GCIRMS_d13C_Processor
+username:
+account: jackh
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 7101595
+bundleId: 7571047
+url: https://jackh.shinyapps.io/GCIRMS_d13C_Processor/
+when: 1692129304.07887
+lastSyncTime: 1692129304.07888
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: Example Export.csv|GCIRMS C Template 2023-08-15.xlsx|old_files/Example Export.csv|old_files/GCIRMS C Template.xlsx

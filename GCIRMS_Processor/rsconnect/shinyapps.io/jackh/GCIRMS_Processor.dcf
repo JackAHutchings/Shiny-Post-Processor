@@ -1,0 +1,14 @@
+name: GCIRMS_Processor
+title: GCIRMS_Processor
+username:
+account: jackh
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1295068
+bundleId: 7571085
+url: https://jackh.shinyapps.io/GCIRMS_Processor/
+when: 1692130069.88725
+lastSyncTime: 1692130069.88726
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: Example Export.csv|GCIRMS Template.xlsx
