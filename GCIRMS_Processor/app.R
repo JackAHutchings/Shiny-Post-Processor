@@ -348,13 +348,11 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     group_by(size_group) %>% 
                     mutate(size_slope = lm(dD_zeroed~value)$coefficients[2],  # Calculate the size effect using the 'value' variable
                            size_intercept = lm(dD_zeroed~value)$coefficients[1]) %>%  # Doing segmented size correction requires an intercept.
-                    mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
-                           size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
                     mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
                     mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
-                    mutate(dD_processing = dD_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                    mutate(dD_processing = dD_processing - (size_slope*value + size_intercept) * size_opt_out) %>%  # Perform the correction by subtracting the dD 'anomaly'. In addition, possibly multiply the correction by zero if "no size effect correction" is indicated.)  
                     rowwise() %>% 
                     mutate(value = ifelse(size_model_option %in% c(2,3),exp(value),value)) %>% 
                     group_by(mix_comp_class) %>% 
@@ -396,13 +394,11 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                            intercept_vs_dD_intercept = lm(comp_specific_intercept~stage1_correction)$coefficients[1]) %>% 
                     mutate(size_slope = slope_vs_dD_slope * stage1_correction + slope_vs_dD_intercept,
                            size_intercept = intercept_vs_dD_slope * stage1_correction + intercept_vs_dD_intercept) %>% 
-                    mutate(size_slope = size_slope * size_opt_out, # Change the size effect slope to zero if we aren't using it.
-                           size_intercept = size_intercept * size_opt_out) %>%  # Same for intercept.
                     mutate(size_slope = ifelse(grepl("Normal",size_group),size_slope*size_normal_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Normal",size_group),size_intercept*size_normal_peak_action,size_intercept)) %>% 
                     mutate(size_slope = ifelse(grepl("Small",size_group),size_slope*size_small_peak_action,size_slope),
                            size_intercept = ifelse(grepl("Small",size_group),size_intercept*size_small_peak_action,size_intercept)) %>% 
-                    mutate(dD_processing = dD_processing - (size_slope*value + size_intercept)) %>%  # Perform the correction by subtracting the dD 'anomaly'.)
+                    mutate(dD_processing = dD_processing - (size_slope*value + size_intercept) * size_opt_out) %>%  # Perform the correction by subtracting the dD 'anomaly'. In addition, possibly multiply the correction by zero if "no size effect correction" is indicated.)
                     rowwise() %>% 
                     mutate(value = ifelse(size_model_option %in% c(2,3),exp(value),value)) %>% 
                     group_by(mix_comp_class) %>% 
@@ -489,7 +485,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                     rowwise() %>% 
                     mutate(size_value = ifelse(size_model_option %in% c(2,3),log(size_value),size_value)) %>% 
                     mutate(dD_presize = dD_processing,
-                           dD_processing = dD_presize - (size_slope*size_value + size_intercept),
+                           dD_processing = dD_presize - (size_slope*size_value + size_intercept) * size_opt_out, #Apply the appropriate size effect coefficients. Possibly multiply by 0 if "No size effect correction." is indicated.
                            dD_size = dD_processing,
                            size_value = ifelse(size_model_option %in% c(2,3),exp(size_value),size_value)) %>% 
                     filter(!is.na(dD_processing))
@@ -561,7 +557,7 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
                            dD_stage1_correction = dD_presize - (general_slope * log(size_value) + general_intercept),
                            size_slope = slope_vs_dD_slope * dD_stage1_correction + slope_vs_dD_intercept,
                            size_intercept = intercept_vs_dD_slope * dD_stage1_correction + intercept_vs_dD_intercept,
-                           dD_processing = dD_presize - (size_slope*log(size_value) + size_intercept),
+                           dD_processing = dD_presize - (size_slope*log(size_value) + size_intercept) * size_opt_out,  #Apply the appropriate size effect coefficients. Possibly multiply by 0 if "No size effect correction." is indicated.,
                            dD_size = dD_processing) %>% 
                     select(-c(general_intercept:slope_vs_dD_slope)) %>% 
                     filter(!is.na(dD_processing))
