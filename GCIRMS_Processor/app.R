@@ -18,11 +18,11 @@ library(plotly)
 
 #testing
 # {
-#   setwd("C:/github/Shiny-Post-Processor/GCIRMS_Processor")
-#   raw_isodat_file = "Example Export.csv"
-#   gcirms_template_file = "GCIRMS Template.xlsx"
-#   initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
-#   list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
+  # setwd("C:/github/Shiny-Post-Processor/GCIRMS_Processor")
+  # raw_isodat_file = "Example Export.csv"
+  # gcirms_template_file = "GCIRMS Template.xlsx"
+  # initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
+  # list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -640,10 +640,10 @@ normalization_function <- function(input,normalization_option,normalization_comp
     
     scale_check <- input %>% filter(grepl("standard",id2))
     
-    # normalization_comps = paste(normalization_comps,"(ACAL)")
+    # normalization_comps = c("C23 Alkane (ACAL2)","C31 Alkane (ACAL2)")
     
     if(length(scale_check$id2) > 0){
-        normalization_option = ifelse(grepl("Linear interpolation between adjacent normalization standards",normalization_option),1,2)
+        normalization_action = ifelse(grepl("Linear interpolation between adjacent normalization standards",normalization_option),1,2)
 
         comps_to_use = input %>% 
             filter(!grepl("Ref",comp_class)) %>% 
@@ -660,7 +660,7 @@ normalization_function <- function(input,normalization_option,normalization_comp
             filter(!is.na(dD_known)) %>% 
             select(row,row_base,std_mix,id2,comp,class,dD_known,dD_processing) %>% 
             ungroup() %>% 
-            mutate(i = dense_rank((row_base))) %>%  # Generate an indexing variable for each set of standard injections... only relevant using normalization_option 1
+            mutate(i = dense_rank((row_base))) %>%  # Generate an indexing variable for each set of standard injections... only relevant using normalization_action 1
             group_by(i) %>% 
             # The next mutate is doing the heavy lifting. Each 'bin' is a given standard (i) and the next standard (i+1)
             # We are basically just doing a two point linear regression to find the slope and y-intercept of the line.
@@ -669,11 +669,9 @@ normalization_function <- function(input,normalization_option,normalization_comp
             ungroup() %>% 
             mutate(slope_1 = ifelse(i == max(i),slope_1[which(i == max(i)-1)],slope_1), # Assigns second to last slope to the last standard set.
                    intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1), # Same as above.
-                   slope_2 = lm(dD_known~dD_processing)$coefficients[2], # Calculates the slope for normalization_option = 2
-                   intercept_2 = lm(dD_known~dD_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_option = 2
-            mutate(i = ifelse(i==max(i),i-1,i)) %>% 
-            mutate(slope_1 = ifelse(all(is.na(slope_1)),slope_2,slope_1),
-                   intercept_1 = ifelse(all(is.na(intercept_1)),intercept_2,intercept_1))
+                   slope_2 = lm(dD_known~dD_processing)$coefficients[2], # Calculates the slope for normalization_action = 2
+                   intercept_2 = lm(dD_known~dD_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_action = 2
+            mutate(i = ifelse(i==max(i),i-1,i))
         
         # Next, we need to make a data frame to fill in all the rows (injections) that occurred between the drift samples.
         scale_normalization_2 <- scale_normalization_1 %>% 
@@ -683,7 +681,7 @@ normalization_function <- function(input,normalization_option,normalization_comp
                          values_to = c("value")) %>% 
             separate(coef,c("coef","normalization_method"),sep="_") %>% 
             select(row,i,coef,normalization_method,value) %>% distinct() %>%
-            filter(normalization_method %in% normalization_option) %>%
+            filter(normalization_method %in% normalization_action) %>%
             group_by(coef) %>% 
             mutate(value = ifelse(row == min(row),value[which(row == min(row[which(!is.na(value))]))],value)) %>% 
             arrange(coef,row) %>%  # Sort the dataset by coefficient and then by row. This is important because we use a 'last-observation-carried-forward' command...
@@ -702,8 +700,8 @@ normalization_function <- function(input,normalization_option,normalization_comp
             mutate(start_row = formatC(min(row),width=label_width[1],format="d",flag="0"),
                    end_row = formatC(max(row),width=label_width[1],format="d",flag="0"),
                    method_label = ifelse(normalization_method==2,"Full-Run Normalization",paste0("(Rows ",start_row," - ",end_row,") ","Bracketed Normalization")),
-                   equation = paste0("y = ",round(slope[1],4)," * x + ",round(intercept[1],4)),
-                   label = paste(method_label,equation,sep="\n")) %>% 
+                   equation = paste0("y = ",round(slope[1],4)," * x + ",round(intercept[1],4))) %>% 
+            mutate(label = paste(method_label,equation,sep="\n")) %>% 
             filter(!is.na(dD_known)) %>% 
             ggplot(aes(x=dD_processing, y=dD_known)) +
             geom_point() +
