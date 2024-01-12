@@ -424,14 +424,14 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             
             size_raw_grouped_plot <- size_effect_raw %>% 
                 rowwise() %>% 
-                mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
                 ggplot(aes(x=value,y=dD_zeroed,color=size_group)) +
                 geom_point() +
                 geom_smooth(method="lm",se=F, formula = y~x) +
                 labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
                      subtitle=paste("Impact of Size Effect (SD of Zeroed Isotope Values) = ",size_effect_raw$raw_performance_rmse[1]," \u2030"),
                      y="Uncorrected \u03B4D ( \u2030 )",
-                     x=size_label)
+                     x=size_label) + 
+                if(size_model_option %in% c(2,3)){scale_x_log10(n.breaks=6)}
             
             size_corrected_bycomp_plot <- size_effect_raw %>% 
                 rowwise() %>% 
@@ -446,14 +446,14 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             
             size_corrected_grouped_plot <- size_effect_raw %>% 
               rowwise() %>% 
-              mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
               ggplot(aes(x=value,y=dD_drift_size_zeroed)) +
               geom_point(aes(color=mix_comp_class)) +
               geom_smooth(method="lm",se=F, formula = y~x) +
               labs(title="Corrected plot of size effect standards.",
                    subtitle=paste("Impact of Size Effect (SD of Zeroed, Corrected Isotope Values) = ",size_effect_raw$model_performance_rmse[1]," \u2030"),
                    y="Size Corrected \u03B4D ( \u2030 )",
-                   x=size_label)
+                   x=size_label) + 
+              if(size_model_option %in% c(2,3)){scale_x_log10(n.breaks=6)}
             
             if(size_model_option != 3){
             
@@ -737,7 +737,7 @@ normalization_function <- function(input,normalization_option,normalization_comp
 
 control_function <- function(input,normalization_comps,processing_order,size_for_control) {
     
-  control_regexpr <- ifelse(size_for_control == "Include Size Standards in Controls","control|size","control")
+  control_regexpr <- ifelse(size_for_control == "Include","control|size","control")
   
   control_check <- input %>% filter(grepl(control_regexpr,id2))
     
@@ -1233,8 +1233,8 @@ final_sample_function <- function(final_data,
                               width = 12,
                               radioButtons("size_for_control",
                                            label = "Select whether or not to include the size standards with the control standards:",
-                                           choices = c("Include Size Standards in Controls",
-                                                       "Exclude Size Standards from Controls"),
+                                           choices = c("Include",
+                                                       "Exclude"),
                                            inline = T)),
                             box(title = NULL,
                                 width = 12,
