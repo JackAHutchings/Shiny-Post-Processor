@@ -18,11 +18,11 @@ library(plotly)
 
 #testing
 # {
-  # setwd("C:/Box Sync/Konecky Lab/Data/Thermo GC-IRMS/Results/2021/02_25 Chacacocha Posturea Batch 3")
-  # raw_isodat_file = "Nadia_06_18_2021(H2 Export).csv"
-  # gcirms_template_file = "GCIRMS Template.xlsx"
-  # initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
-  # list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
+#   setwd("C:/github/Shiny-Post-Processor/GCIRMS_Processor")
+#   raw_isodat_file = "Example Export.csv"
+#   gcirms_template_file = "GCIRMS Template.xlsx"
+#   initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
+#   list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
 # }
 
 ingest_function <- function(raw_isodat_file,gcirms_template_file) {
@@ -135,14 +135,14 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         unite(comp_class,c(comp,class),sep=" ",remove=F,na.rm=T) # This code currently assumes that compound and class uniquely identifies standards in a mix.
 
     #IRMS Drift Plot
-    irms_drift_calc <- data %>%
-        mutate(slope = lm(dD_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to dD relationship... slope first...
-               intercept = lm(dD_raw~raw_R)$coefficients[1], # ... then intercept
-               rawraw_dD = raw_R * slope + intercept) %>%  # Estimate the dD of each ref peak using the above relationship.
-        filter(grepl("Ref",comp)) %>%
-        mutate(leftcenter_dD = rawraw_dD - mean(rawraw_dD[which(row==min(row))])) %>% # Center the extra raw 'rawraw_dD' on the first injection, so that we can see how drift proceeded.
-        group_by(row) %>%
-        mutate(sd = sd(leftcenter_dD)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
+
+    irms_drift_calc <- data %>% 
+      filter(grepl("Ref",comp)) %>%
+      ungroup() %>% 
+      mutate(raw_R_base = mean(raw_R[which(row==min(row))])) %>% 
+      mutate(rawraw_dD = (raw_R/raw_R_base-1)*1000) %>% 
+      group_by(row) %>%
+      mutate(sd = sd(rawraw_dD)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
     
     if(length(irms_drift_calc$comp) == 0){
         plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,label="No Reference Gas Peaks Found.\n\nReference gas peaks should be identified and their name should start with\n'Ref' (i.e., Ref 1 or Reference 1) in the Component/comp column.",color="red")+theme_void()
@@ -150,9 +150,10 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "dD_raw" value that we calibrate.
         # As such, we do not need to correct for this drift at all. Instead, it is just a helpful visualization of how much drift the IRMS experienced during the run.
         # If this is huge (i.e., > 25 permil in range), then maybe it can be diagnostic of a problem...
-        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=leftcenter_dD)) +
+        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=rawraw_dD)) +
             geom_point() +
             labs(title = paste0("Mean Per-Injection Ref Peak SD: ",irms_drift_calc$mean_sd[1]," +/- ",irms_drift_calc$sd_sd[1],"\u2030"),
+                 subtitle = "Uses the Isodat 'rR 3H2/2H2' variable and uses the first set of reference peaks as R_standard.",
                  x = "Injection # in Sequence",
                  y = "IRMS Drift (\u2030)")    
     }
