@@ -18,9 +18,9 @@ library(plotly)
 
 # testing
 {
-  # setwd("C:/Box/Konecky Lab/Data/Thermo GC-IRMS/Results/2023/08_04 VA Alkanes for C Batch D")
-  # raw_isodat_file = "(C export).csv"
-  # gcirms_template_file = "GCIRMS C Template 2023-08-15.xlsx"
+  # setwd("C:/github/Shiny-Post-Processor/GCIRMS_d13C_Processor")
+  # raw_isodat_file = "Example Export.csv"
+  # gcirms_template_file = "GCIRMS C Template.xlsx"
   # initials_tab = read_excel(gcirms_template_file,sheet="Initials")[,1:2]
   # list2env(setNames(as.list(initials_tab$initial_value),initials_tab$variable),.GlobalEnv)
 }
@@ -135,14 +135,13 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         unite(comp_class,c(comp,class),sep=" ",remove=F,na.rm=T) # This code currently assumes that compound and class uniquely identifies standards in a mix.
 
     #IRMS Drift Plot
-    irms_drift_calc <- data %>%
-        mutate(slope = lm(d13C_raw~raw_R)$coefficients[2], # Figure out the general peak area ratio to d13C relationship... slope first...
-               intercept = lm(d13C_raw~raw_R)$coefficients[1], # ... then intercept
-               rawraw_d13C = raw_R * slope + intercept) %>%  # Estimate the d13C of each ref peak using the above relationship.
-        filter(grepl("Ref",comp)) %>%
-        mutate(leftcenter_d13C = rawraw_d13C - mean(rawraw_d13C[which(row==min(row))])) %>% # Center the extra raw 'rawraw_d13C' on the first injection, so that we can see how drift proceeded.
-        group_by(row) %>%
-        mutate(sd = sd(leftcenter_d13C)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
+    irms_drift_calc <- data %>% 
+      filter(grepl("Ref",comp)) %>%
+      ungroup() %>% 
+      mutate(raw_R_base = mean(raw_R[which(row==min(row))])) %>% 
+      mutate(rawraw_d13C = (raw_R/raw_R_base-1)*1000) %>% 
+      group_by(row) %>%
+      mutate(sd = sd(rawraw_d13C)) %>% ungroup() %>% mutate(mean_sd = round(mean(sd),3), sd_sd = round(sd(sd),3)) # Summary stats on how the ref peaks performed.
     
     if(length(irms_drift_calc$comp) == 0){
         plot_irms_drift <- ggplot()+annotate("text",x=0,y=0,
@@ -152,7 +151,7 @@ comp_assign_function <- function(input,standard_info,compound_option) {
         # Note! Because each injection is calculated relative to its reference peak, this drift is fully incorporated into the "d13C_raw" value that we calibrate.
         # As such, we do not need to correct for this drift at all. Instead, it is just a helpful visualization of how much drift the IRMS experienced during the run.
         # If this is huge (i.e., > 25 permil in range), then maybe it can be diagnostic of a problem...
-        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=leftcenter_d13C)) +
+        plot_irms_drift <- ggplot(irms_drift_calc,aes(x=row,y=rawraw_d13C)) +
             geom_point() +
             labs(title = paste0("Mean Per-Injection Ref Peak SD: ",irms_drift_calc$mean_sd[1]," +/- ",irms_drift_calc$sd_sd[1],"\u2030"),
                  x = "Injection # in Sequence",
@@ -418,48 +417,45 @@ size_function <- function(input,size_option,size_cutoff,size_normal_peak_option,
             }
             
             
-          size_raw_bycomp_plot <- size_effect_raw %>% rowwise() %>% 
-            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
+          size_raw_bycomp_plot <- size_effect_raw %>%
             ggplot(aes(x=value,y=d13C_zeroed)) +
             geom_point() +
             facet_wrap(~mix_comp_class,scales="free",nrow=1) +
             geom_smooth(method="lm",se=F, formula = y~x) +
             labs(title="Uncorrected plot of size effect standards.\nFacetted by compound.",
                  x=size_label,
-                 y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )")
+                 y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )") + 
+            if(size_model_option %in% c(2,3)){scale_x_log10(n.breaks=6)}
           
           size_raw_grouped_plot <- size_effect_raw %>% 
-            rowwise() %>% 
-            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
             ggplot(aes(x=value,y=d13C_zeroed,color=size_group)) +
             geom_point() +
             geom_smooth(method="lm",se=F, formula = y~x) +
             labs(title="Uncorrected plot of size effect standards.\nThe slope of this line is used for correction.",
                  subtitle=paste("Impact of Size Effect (SD of Zeroed Isotope Values) = ",size_effect_raw$raw_performance_rmse[1]),
                  y="Uncorrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                 x=size_label)
+                 x=size_label) +
+            if(size_model_option %in% c(2,3)){scale_x_log10(n.breaks=6)}
           
           size_corrected_bycomp_plot <- size_effect_raw %>% 
-            rowwise() %>% 
-            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
             ggplot(aes(x=value,y=d13C_processing)) +
             geom_point() +
             facet_wrap(~mix_comp_class,scales="free_y",nrow=1) +
             geom_smooth(method="lm",se=F, formula = y~x) +
             labs(title="Corrected plot of size effect standards.\nNote: Slope is not zero because the compounds do not behave identically.",
                  y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                 x=size_label)
+                 x=size_label) +
+            if(size_model_option %in% c(2,3)){scale_x_log10(n.breaks=6)}
           
           size_corrected_grouped_plot <- size_effect_raw %>% 
-            rowwise() %>% 
-            mutate(value = ifelse(size_model_option %in% c(2,3),log(value),value)) %>% 
             ggplot(aes(x=value,y=d13C_drift_size_zeroed)) +
             geom_point(aes(color=mix_comp_class)) +
             geom_smooth(method="lm",se=F, formula = y~x) +
             labs(title="Corrected plot of size effect standards.",
                  subtitle=paste("Impact of Size Effect (SD of Zeroed, Corrected Isotope Values) = ",size_effect_raw$model_performance_rmse[1]),
                  y="Size Corrected \u03B4\u00b9\u00b3C ( \u2030 )",
-                 x=size_label)
+                 x=size_label) +
+            if(size_model_option %in% c(2,3)){scale_x_log10(n.breaks=6)}
             
             if(size_model_option != 3){
             
@@ -645,10 +641,10 @@ normalization_function <- function(input,normalization_option,normalization_mix,
     
     scale_check <- input %>% filter(grepl("standard",id2) | grepl(normalization_mix,id1))
     
-    # normalization_comps = paste(c("C20 FAME","C31 Alkane"),"(CAL)")
+    normalization_comps = paste(c("C20 FAME","C31 Alkane"),"(ACAL2)")
     
     if(length(scale_check$id2) > 0){
-        normalization_option = ifelse(grepl("Linear interpolation between adjacent normalization standards",normalization_option),1,2)
+        normalization_action = ifelse(grepl("Linear interpolation between adjacent normalization standards",normalization_option),1,2)
 
         comps_to_use = input %>% 
             filter(!grepl("Ref",comp_class)) %>% 
@@ -665,7 +661,7 @@ normalization_function <- function(input,normalization_option,normalization_mix,
             filter(!is.na(d13C_known)) %>% 
             select(row,row_base,std_mix,id2,comp,class,d13C_known,d13C_processing) %>% 
             ungroup() %>% 
-            mutate(i = dense_rank((row_base))) %>%  # Generate an indexing variable for each set of standard injections... only relevant using normalization_option 1
+            mutate(i = dense_rank((row_base))) %>%  # Generate an indexing variable for each set of standard injections... only relevant using normalization_action 1
             group_by(i) %>% 
             # The next mutate is doing the heavy lifting. Each 'bin' is a given standard (i) and the next standard (i+1)
             # We are basically just doing a two point linear regression to find the slope and y-intercept of the line.
@@ -674,11 +670,9 @@ normalization_function <- function(input,normalization_option,normalization_mix,
             ungroup() %>% 
             mutate(slope_1 = ifelse(i == max(i),slope_1[which(i == max(i)-1)],slope_1), # Assigns second to last slope to the last standard set.
                    intercept_1 = ifelse(i == max(i),intercept_1[which(i == max(i)-1)],intercept_1), # Same as above.
-                   slope_2 = lm(d13C_known~d13C_processing)$coefficients[2], # Calculates the slope for normalization_option = 2
-                   intercept_2 = lm(d13C_known~d13C_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_option = 2
-            mutate(i = ifelse(i==max(i),i-1,i)) %>% 
-            mutate(slope_1 = ifelse(all(is.na(slope_1)),slope_2,slope_1),
-                   intercept_1 = ifelse(all(is.na(intercept_1)),intercept_2,intercept_1))
+                   slope_2 = lm(d13C_known~d13C_processing)$coefficients[2], # Calculates the slope for normalization_action = 2
+                   intercept_2 = lm(d13C_known~d13C_processing)$coefficients[1]) %>%   # Calculates the intercept for normalization_action = 2
+            mutate(i = ifelse(i==max(i),i-1,i))
         
         # Next, we need to make a data frame to fill in all the rows (injections) that occurred between the drift samples.
         scale_normalization_2 <- scale_normalization_1 %>% 
@@ -688,7 +682,7 @@ normalization_function <- function(input,normalization_option,normalization_mix,
                          values_to = c("value")) %>% 
             separate(coef,c("coef","normalization_method"),sep="_") %>% 
             select(row,i,coef,normalization_method,value) %>% distinct() %>%
-            filter(normalization_method %in% normalization_option) %>%
+            filter(normalization_method %in% normalization_action) %>%
             group_by(coef) %>% 
             mutate(value = ifelse(row == min(row),value[which(row == min(row[which(!is.na(value))]))],value)) %>% 
             arrange(coef,row) %>%  # Sort the dataset by coefficient and then by row. This is important because we use a 'last-observation-carried-forward' command...
